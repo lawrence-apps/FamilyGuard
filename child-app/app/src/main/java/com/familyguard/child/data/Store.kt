@@ -80,6 +80,23 @@ object Store {
         get() = prefs.getLong("lastAdminAlert", 0L)
         set(v) = prefs.edit().putLong("lastAdminAlert", v).apply()
 
+    // ---- runtime-only flags (not persisted on purpose) ----
+
+    /** SystemClock.elapsedRealtime() when we last popped the MediaProjection consent
+     *  dialog. The accessibility auto-confirm only acts within 60 s of this, so it can
+     *  never click a dialog we did not ask for. */
+    @Volatile
+    var projectionRequestedAt: Long = 0L
+
+    /** Parent pressed "Start mirroring" while capture permission was missing
+     *  (e.g. right after reboot). fps >= 0 means a mirror start is pending and
+     *  streaming resumes automatically as soon as consent is granted. */
+    @Volatile
+    var pendingMirrorFps: Int = -1
+
+    @Volatile
+    var pendingMirrorQuality: Int = 60
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }

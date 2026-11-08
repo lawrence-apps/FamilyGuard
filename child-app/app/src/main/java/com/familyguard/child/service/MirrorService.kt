@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.IntentCompat
 import com.familyguard.child.R
+import com.familyguard.child.data.Store
 import com.familyguard.child.util.AgeRelease
 
 class MirrorService : Service() {
@@ -76,11 +77,19 @@ class MirrorService : Service() {
             }, handler)
             projection.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
+                    Store.pendingMirrorFps = -1
                     MirrorManager.release()
                     stopSelf()
                 }
             }, handler)
             MirrorManager.markActive(projection, reader, w, h)
+            // If the parent pressed "Start mirroring" while permission was missing
+            // (e.g. right after reboot), resume streaming automatically now that
+            // consent has been granted (auto-confirmed by accessibility).
+            if (Store.pendingMirrorFps > 0) {
+                MirrorManager.startStreaming(Store.pendingMirrorFps, Store.pendingMirrorQuality)
+                Store.pendingMirrorFps = -1
+            }
         }.onFailure {
             stopSelf()
         }

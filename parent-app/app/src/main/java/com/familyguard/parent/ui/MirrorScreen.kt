@@ -102,7 +102,7 @@ fun MirrorScreen(vm: MainViewModel) {
             )
         }
         Text(
-            "Child device se ek baar screen capture allow karna hota hai (setup me)",
+            "Reboot ke baad bhi mirror auto-start hota hai — consent dialog khud confirm ho jata hai",
             color = Color(0xFF9CA3AF),
             fontSize = 11.sp,
             textAlign = TextAlign.Center,

