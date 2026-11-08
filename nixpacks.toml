@@ -1,11 +1,10 @@
-# Nixpacks config for Coolify — the Node backend lives in backend/
-# (repo root has no package.json, so auto-detection needs this file)
-
-[phases.setup]
-nixPkgs = ["nodejs_22"]
-
-[phases.install]
-cmds = ["cd backend && (npm ci --omit=dev || npm install --omit=dev)"]
+# Nixpacks fine-tuning for Coolify.
+# NOTE: app-type detection comes from the root package.json (Node provider).
+# This file only pins the start command and data dir.
 
 [start]
-cmd = "cd backend && node server.js"
+cmd = "node backend/server.js"
+
+[variables]
+DATA_DIR = "/app/data"
+PORT = "8080"

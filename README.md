@@ -52,20 +52,24 @@ node server.js          # listens on :8080 (PORT env)
 - If your proxy terminates TLS, enable **WebSocket passthrough** (`/ws`, Upgrade header) — mirroring, live location and commands run over it.
 - Health check: `GET /health`.
 
-### DeployHub par deploy (your-server.example.com)
+### Coolify / DeployHub par deploy (your-server.example.com)
+
+**Auto-deploy (default Nixpacks build pack)** — repo root me `package.json` hai, isliye Nixpacks app type khud detect kar leta hai. Bas **Deploy → Redeploy** dabao.
 
 Login/pairing **har redeploy ke baad banaye rakhne** ke liye ye 2 cheezein zaroori hain:
 
-1. **Persistent volume mount karo: `/app/data`** — isi folder me `db.json` (accounts, children, pairing) aur `jwt.secret` (login tokens) rehte hain. Volume na ho to har redeploy par sab data udd jayega aur aapko dobara register + re-pair karna padega.
+1. **Persistent volume mount karo: `/app/data`** — isi folder me `db.json` (accounts, children, pairing) aur `jwt.secret` (login tokens) rehte hain. Volume na ho to har redeploy par sab data udd jayega aur aapko dobara register + re-pair karna padega. (Coolify → app → Storage → "Add volume": mount `/app/data`.)
 2. **(Optional, best) `JWT_SECRET` env set karo** — koi bhi lamba random string. Ye pin ho jayega to token validity data file par depend nahi karegi.
 
-DeployHub panel me:
-- **Repo / Dockerfile**: repo root ka `backend/Dockerfile` (build context `backend/`) ya repo root me `docker-compose.yml` use karo.
-- **Port**: `8080` (HTTP). Domain `your-server.example.com` point karo; TLS terminate karne wale proxy me **WebSocket upgrade** (`/ws`) enable hona chahiye.
-- **Volume**: Host path ya named volume → container path **`/app/data`**.
+Coolify panel me:
+- **Build Pack**: `Nixpacks` (default, ab kaam karega — root `package.json` se detect hota hai) **ya** `Dockerfile` (root `Dockerfile` bhi repo me hai, fallback ke liye).
+- **Port**: `8080`. Domain point karo; TLS terminate karne wale proxy me **WebSocket upgrade** (`/ws`) enable hona chahiye.
+- **Volume**: named/host volume → container path **`/app/data`**.
 - **Health check path**: `/health`.
 
-Deploy ke baad verify: `https://your-server.example.com/health` → `{"ok":true,...}`.
+Agar Nixpacks phir bhi "failed to detect" de to: **Build Pack = Dockerfile** kar do — root `Dockerfile` turant build ho jayega.
+
+Deploy ke baad verify: `https://<your-domain>/health` → `{"ok":true,...}`.
 
 ## 2) Get the APKs
 
