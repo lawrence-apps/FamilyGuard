@@ -113,7 +113,7 @@ Same feature set as the parent app: live status, screen time + bedtime rules, ap
   - Accessibility + Device admin are removed, services stop, rules cleared
   - A `released` event appears in the parent Alerts feed
   - The **system uninstall dialog** opens (and re-opens on boot/open until uninstalled)
-- Parents can trigger the same instantly: dashboard/More → **Release protections**.
+- Parents can trigger the same instantly, anytime: dashboard → **Uninstall** quick action (confirm dialog) or More → **Release protections & uninstall**.
 
 ## 6) Self-healing — kuch bhi toote to bacche ka phone dobara nahi lena padta
 

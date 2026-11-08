@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
@@ -129,7 +130,8 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
                 vm = vm,
                 nav = nav,
                 onLock = { showLock = true },
-                onMessage = { showMessage = true }
+                onMessage = { showMessage = true },
+                onRelease = { showRelease = true }
             )
         }
 
@@ -153,9 +155,9 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
     }
     if (showRelease) {
         ConfirmDialog(
-            title = "Release protections",
-            text = "Protections on the child device will be disabled and the uninstall dialog will appear there. Continue?",
-            confirmLabel = "Release",
+            title = "Release & uninstall child app",
+            text = "All protections on the child device will be removed automatically: accessibility + device admin disabled, rules cleared, services stopped — then the system uninstall dialog opens there and keeps re-opening until the app is fully uninstalled. Continue?",
+            confirmLabel = "Release & uninstall",
             onConfirm = { vm.sendCommand("release_protections") },
             onDismiss = { showRelease = false }
         )
@@ -351,7 +353,8 @@ private fun QuickActions(
     vm: MainViewModel,
     nav: NavHostController,
     onLock: () -> Unit,
-    onMessage: () -> Unit
+    onMessage: () -> Unit,
+    onRelease: () -> Unit
 ) {
     val actions = listOf(
         QuickAction("Locate", Icons.Outlined.LocationOn) { vm.sendCommand("locate_now") },
@@ -369,6 +372,7 @@ private fun QuickActions(
         QuickAction("Message", Icons.Outlined.Chat) { onMessage() },
         QuickAction("Geofence", Icons.Outlined.AddLocationAlt) { nav.navigate("geofence") },
         QuickAction("Auto-Repair", Icons.Outlined.Build) { vm.sendCommand("heal") },
+        QuickAction("Uninstall", Icons.Outlined.DeleteForever) { onRelease() },
         QuickAction("More tools", Icons.Outlined.Tune) { nav.navigate("remote") }
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
