@@ -281,8 +281,10 @@ function handleWs(m) {
         $("media-card").classList.remove("hidden");
         $("media-img").src = S.origin + d.url;
         toast("Capture received ✓");
+      } else if (m.ok && d.lat != null && d.lng != null) {
+        toast("Command done ✓ (" + Number(d.lat).toFixed(5) + ", " + Number(d.lng).toFixed(5) + ")");
       } else if (m.ok) {
-        toast("Command done ✓" + (d.lat != null ? " (" + d.lat.toFixed(5) + ", " + d.lng.toFixed(5) + ")" : ""));
+        toast("Command done ✓");
       } else {
         toast("Command failed: " + (d.error || "unknown"));
       }

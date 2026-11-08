@@ -37,7 +37,17 @@ class UsageWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
         }
         if (Store.cid.isBlank()) return Result.success()
 
-        runCatching { Api.me() }.getOrNull()?.let {
+        runCatching { Api.me() }.onFailure { e ->
+            // Pairing token no longer valid on the server (e.g. server DB reset).
+            // Unpair so the device can be re-paired from the setup wizard.
+            if ((e.message ?: "").contains("401")) {
+                Store.clearAll()
+                runCatching {
+                    applicationContext.stopService(android.content.Intent(applicationContext, MainService::class.java))
+                }
+                return Result.success()
+            }
+        }.getOrNull()?.let {
             Store.childName = it.name
             if (it.dob.isNotBlank()) Store.dob = it.dob
         }

@@ -51,6 +51,21 @@ node server.js          # listens on :8080 (PORT env)
 - If your proxy terminates TLS, enable **WebSocket passthrough** (`/ws`, Upgrade header) — mirroring, live location and commands run over it.
 - Health check: `GET /health`.
 
+### DeployHub par deploy (your-server.example.com)
+
+Login/pairing **har redeploy ke baad banaye rakhne** ke liye ye 2 cheezein zaroori hain:
+
+1. **Persistent volume mount karo: `/app/data`** — isi folder me `db.json` (accounts, children, pairing) aur `jwt.secret` (login tokens) rehte hain. Volume na ho to har redeploy par sab data udd jayega aur aapko dobara register + re-pair karna padega.
+2. **(Optional, best) `JWT_SECRET` env set karo** — koi bhi lamba random string. Ye pin ho jayega to token validity data file par depend nahi karegi.
+
+DeployHub panel me:
+- **Repo / Dockerfile**: repo root ka `backend/Dockerfile` (build context `backend/`) ya repo root me `docker-compose.yml` use karo.
+- **Port**: `8080` (HTTP). Domain `your-server.example.com` point karo; TLS terminate karne wale proxy me **WebSocket upgrade** (`/ws`) enable hona chahiye.
+- **Volume**: Host path ya named volume → container path **`/app/data`**.
+- **Health check path**: `/health`.
+
+Deploy ke baad verify: `https://your-server.example.com/health` → `{"ok":true,...}`.
+
 ## 2) Get the APKs
 
 **Option A — GitHub Actions (no Android Studio needed)**
@@ -105,6 +120,13 @@ Same feature set as the parent app: live status, screen time + bedtime rules, ap
 - **Mirror says "no permission"**: screen capture consent is granted in setup (step 8); after a reboot Android may need it again — parent app → Mirror → it will prompt the child device once.
 - **HTTP test server**: both apps allow `http://` URLs (cleartext enabled) for LAN testing.
 - **Reset everything**: delete `backend/data/db.json` and restart, then re-register/re-pair.
+
+### Login / session notes (baar-baar login nahi hoga)
+
+- **Parent app**: token `SharedPreferences` me save hota hai — app kholte hi auto-login. Token 365 din valid rehta hai. Agar server ka DB reset ho jaye (ya JWT secret badal jaye) to app **khud detect** karke ek baar login screen dikhati hai ("Session expired — login again") — blank dashboard pe atak nahi jaata.
+- **Web dashboard**: token `localStorage` me — browser band karke wapas khologe to seedha dashboard milega.
+- **Child app**: pairing token bhi persist hota hai; server DB reset hone par child khud ko unpair kar deta hai — `*#*#2724#*#*` dial karke 2 minute me naya code daal ke re-pair ho jata hai.
+- **Kabhi bhi repeated login na aaye** to DeployHub me `/app/data` volume laga hua check karo (upar dekho) — bina volume ke har redeploy par data reset hota hai.
 
 ## Privacy & legal
 

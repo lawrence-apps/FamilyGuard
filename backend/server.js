@@ -305,7 +305,9 @@ app.post('/api/commands', auth, parentOnly, (req, res) => {
 // ---------------------------------------------------------------- media
 app.post('/api/media/:cid', auth, childOrParent, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'file required' });
-  const ext = EXT_BY_TYPE[req.file.mimetype] || path.extname(req.file.originalname || '') || '.bin';
+  // Ext must always match the media GET regex: [a-f0-9]{24}\.(jpg|png|webp|bin)
+  const ext = EXT_BY_TYPE[req.file.mimetype]
+    || (String(req.file.mimetype || '').startsWith('image/') ? '.jpg' : '.bin');
   const name = crypto.randomBytes(12).toString('hex') + ext;
   const fs = require('fs');
   fs.renameSync(req.file.path, path.join(store.MEDIA_DIR, name));

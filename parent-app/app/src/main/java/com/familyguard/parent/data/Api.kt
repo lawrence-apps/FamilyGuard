@@ -43,6 +43,11 @@ object Api {
     private inline fun <reified T> call(request: Request): T {
         Graph.client.newCall(request).execute().use { resp ->
             val text = resp.body?.string() ?: ""
+            if (resp.code == 401) {
+                // Token rejected (expired / server DB reset) — flip to login once.
+                Session.kick("Session expired — login again")
+                throw IOException("HTTP 401: session expired")
+            }
             if (!resp.isSuccessful) {
                 val snippet = if (text.length > 200) text.substring(0, 200) else text
                 throw IOException("HTTP ${resp.code}: $snippet")

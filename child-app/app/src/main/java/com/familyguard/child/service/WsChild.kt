@@ -1,5 +1,6 @@
 package com.familyguard.child.service
 
+import android.content.Intent
 import com.familyguard.child.Graph
 import com.familyguard.child.data.Api
 import com.familyguard.child.data.Geofence
@@ -74,6 +75,15 @@ object WsChild {
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (code == 4001) {
+                // Server rejected the pairing token (fresh DB after a redeploy).
+                // Reset pairing so the next open via *#*#2724#*#* shows the setup
+                // wizard again instead of looping forever on a dead token.
+                Store.paired = false
+                Store.token = ""
+                Store.cid = ""
+                runCatching { Graph.app.stopService(Intent(Graph.app, MainService::class.java)) }
+            }
             markClosed()
         }
 

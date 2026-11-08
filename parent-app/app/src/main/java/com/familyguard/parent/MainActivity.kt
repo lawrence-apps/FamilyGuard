@@ -25,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.familyguard.parent.data.Session
 import com.familyguard.parent.data.Store
 import com.familyguard.parent.ui.AlertsScreen
 import com.familyguard.parent.ui.AppsScreen
@@ -90,8 +92,19 @@ class MainActivity : ComponentActivity() {
 private fun Root(vm: MainViewModel) {
     val context = LocalContext.current
     var auth by remember { mutableStateOf(Store.token.isNotEmpty()) }
+    var notice by remember { mutableStateOf("") }
+
+    // Backend rejected the saved token (401 / WS 4001): show login once, with reason.
+    LaunchedEffect(Unit) {
+        Session.expired.collect { reason ->
+            notice = reason
+            auth = false
+        }
+    }
+
     if (!auth) {
-        LoginScreen(onLoggedIn = {
+        LoginScreen(notice = notice, onLoggedIn = {
+            notice = ""
             auth = true
             vm.startSession()
             ContextCompat.startForegroundService(context, Intent(context, AlertService::class.java))

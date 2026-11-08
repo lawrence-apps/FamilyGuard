@@ -35,11 +35,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.familyguard.parent.R
 import com.familyguard.parent.data.Api
+import com.familyguard.parent.data.Session
 import com.familyguard.parent.data.Store
 import kotlinx.coroutines.launch
 
 @Composable
-fun LoginScreen(onLoggedIn: () -> Unit) {
+fun LoginScreen(notice: String = "", onLoggedIn: () -> Unit) {
     var server by remember { mutableStateOf(Store.serverUrl) }
     var user by remember { mutableStateOf(Store.username) }
     var pass by remember { mutableStateOf("") }
@@ -57,6 +58,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                 val resp = if (register) Api.register(user.trim(), pass) else Api.login(user.trim(), pass)
                 Store.token = resp.token
                 Store.username = user.trim()
+                Session.armed()
                 runCatching { Api.children() }
                 onLoggedIn()
             } catch (e: Exception) {
@@ -110,6 +112,10 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth()
         )
+        if (notice.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(notice, color = MaterialTheme.colorScheme.tertiary, fontSize = 13.sp)
+        }
         if (error.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)

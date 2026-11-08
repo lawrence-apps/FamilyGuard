@@ -107,6 +107,13 @@ class WsManager {
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             connected.value = false
             this@WsManager.webSocket = null
+            if (code == 4001) {
+                // Server rejected our token (fresh DB after redeploy). Stop retrying
+                // and send the user back to the login screen.
+                wantConnected = false
+                Session.kick("Session expired — login again")
+                return
+            }
             scheduleReconnect()
         }
 
