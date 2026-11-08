@@ -375,7 +375,8 @@ async function syncApkFromGithub({ manual = false } = {}) {
 
     const cur = apkMeta();
     // Manual upload is a deliberate override — background sync must not replace it.
-    if (!manual && cur && cur.source === 'manual') {
+    // (Missing source = legacy manual upload from before auto-sync existed.)
+    if (!manual && cur && (!cur.source || cur.source === 'manual')) {
       return { ok: true, skipped: true, ...base, reason: 'manual upload override hai — auto-sync ne nahi chhua' };
     }
     const fresh = cur && cur.source === 'github' && cur.assetId === asset.id &&
@@ -446,7 +447,8 @@ app.post('/api/apk', auth, parentOnly, apkUpload.single('file'), (req, res) => {
     shareToken: crypto.randomBytes(8).toString('hex'),
     originalName: name.slice(0, 120),
     size: req.file.size,
-    uploadedAt: Date.now()
+    uploadedAt: Date.now(),
+    source: 'manual'
   };
   fs.writeFileSync(APK_META, JSON.stringify(meta));
   res.json(apkStatus());
