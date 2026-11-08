@@ -114,6 +114,7 @@ async function enterApp() {
   connectWs();
   S.pollTimer = setInterval(refreshChildren, 15000);
   loadAlerts();
+  loadApk();
   if (!S.children.length) showCreateChild();
 }
 
@@ -243,6 +244,81 @@ function renderChildrenList() {
     });
   });
 }
+
+/* ---------------- child apk share ---------------- */
+async function loadApk() {
+  try {
+    renderApk(await api("/api/apk"));
+  } catch (e) {}
+}
+
+function renderApk(st) {
+  S.apk = st;
+  const has = !!(st && st.uploaded);
+  $("apk-upload").classList.toggle("hidden", has);
+  ["apk-replace", "apk-copy", "apk-share", "apk-delete"].forEach((id) => $(id).classList.toggle("hidden", !has));
+  if (has) {
+    const url = S.origin + st.url;
+    $("apk-hint").textContent = "Link child phone par kholo (share ya QR scan) — APK download hoke install ho jayega. Har upload par naya token banta hai.";
+    $("apk-link").classList.remove("hidden");
+    $("apk-link").textContent = url;
+    try {
+      const q = qrcode(0, "M");
+      q.addData(url);
+      q.make();
+      $("apk-qr").classList.remove("hidden");
+      $("apk-qr").innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    } catch (e) { $("apk-qr").classList.add("hidden"); }
+  } else {
+    $("apk-hint").textContent = "Child APK (GitHub Actions → familyguard-child-debug-apk) ek baar upload karo — fir yahin se link/QR share karke child phone par install karo. Dobara GitHub kholne ki zarurat nahi.";
+    $("apk-link").classList.add("hidden");
+    $("apk-qr").classList.add("hidden");
+  }
+}
+
+$("apk-upload").onclick = () => $("apk-file").click();
+$("apk-replace").onclick = () => $("apk-file").click();
+$("apk-file").onchange = async () => {
+  const f = $("apk-file").files[0];
+  if (!f) return;
+  $("apk-hint").textContent = "Uploading " + f.name + " …";
+  try {
+    const fd = new FormData();
+    fd.append("file", f);
+    const res = await fetch(S.origin + "/api/apk", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + S.token },
+      body: fd
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+    renderApk(data);
+    toast("Child APK uploaded ✓");
+  } catch (e) {
+    $("apk-hint").textContent = "Upload failed: " + e.message;
+  } finally {
+    $("apk-file").value = "";
+  }
+};
+$("apk-copy").onclick = async () => {
+  const url = S.origin + (S.apk && S.apk.url ? S.apk.url : "");
+  try { await navigator.clipboard.writeText(url); toast("Link copied ✓"); }
+  catch (e) { prompt("Copy this link:", url); }
+};
+$("apk-share").onclick = async () => {
+  const url = S.origin + (S.apk && S.apk.url ? S.apk.url : "");
+  if (navigator.share) {
+    try { await navigator.share({ title: "FamilyGuard Child App", text: "FamilyGuard child app install karo — ye link child phone par kholo:", url }); } catch (e) {}
+  } else {
+    window.open("https://wa.me/?text=" + encodeURIComponent("FamilyGuard child app install karo — ye link child phone par kholo: " + url), "_blank");
+  }
+};
+$("apk-delete").onclick = () => {
+  dialog("Remove uploaded APK?", "<p>Install link band ho jayega. Child phone par pehle se installed app par koi asar nahi hoga.</p>", async () => {
+    await api("/api/apk", "DELETE");
+    renderApk({ uploaded: false });
+  });
+};
 
 /* ---------------- websocket ---------------- */
 function connectWs() {

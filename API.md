@@ -97,6 +97,12 @@ Actions:
 - `POST /api/media/:cid` (child or parent) multipart field `file` → `{url:"/media/<name>"}`
 - `GET /media/:name` → file bytes (public; name is a 24-hex unguessable token). Append to base URL.
 
+### Child app APK share link (parent auth)
+- `GET /api/apk` → `{uploaded, url:"/apk/child?t=<token>", fileName, size, uploadedAt}`
+- `POST /api/apk` multipart field `file` (.apk, max 150 MB) → same status object. Replaces the previous APK and rotates the share token.
+- `DELETE /api/apk` → `{ok:true}` (removes APK + link)
+- `GET /apk/child?t=<token>` (public, token required) → browsers get an install landing page; `?dl=1` or non-HTML clients get the APK stream (`application/vnd.android.package-archive`). Files persist in `DATA_DIR/apk/` (survives redeploys with the `/app/data` volume).
+
 ### Misc
 - `GET /health` → `{ok:true, ...}`
 - `GET /` → small status page

@@ -66,6 +66,20 @@
           <button id="new-child" class="btn small">+ New child</button>
         </div>
       </div>
+      <div class="card" id="apk-card">
+        <h3>📱 Child app — install link</h3>
+        <p class="muted small" id="apk-hint">Checking…</p>
+        <input type="file" id="apk-file" accept=".apk,application/vnd.android.package-archive" class="hidden">
+        <div class="row">
+          <button id="apk-upload" class="btn small">⬆ Upload APK</button>
+          <button id="apk-replace" class="btn small hidden">Replace</button>
+          <button id="apk-copy" class="btn small hidden">📋 Copy link</button>
+          <button id="apk-share" class="btn small hidden">Share</button>
+          <button id="apk-delete" class="btn small danger hidden" style="margin-top:0">Remove</button>
+        </div>
+        <div id="apk-link" class="hidden" style="margin-top:8px;padding:8px;border-radius:8px;background:#0B1220;color:#93C5FD;font-size:12px;word-break:break-all;user-select:all"></div>
+        <div id="apk-qr" class="hidden" style="text-align:center;margin-top:10px"></div>
+      </div>
       <h3>Quick actions</h3>
       <div class="grid" id="quick-grid">
         <button data-cmd="locate_now">📍 Locate now</button>
@@ -226,6 +240,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

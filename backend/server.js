@@ -1,6 +1,7 @@
 // FamilyGuard — self-hosted backend (personal use)
 // Node >= 18, pure-JS deps only. Data in ./data/db.json, media in ./data/media.
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
@@ -309,7 +310,6 @@ app.post('/api/media/:cid', auth, childOrParent, upload.single('file'), (req, re
   const ext = EXT_BY_TYPE[req.file.mimetype]
     || (String(req.file.mimetype || '').startsWith('image/') ? '.jpg' : '.bin');
   const name = crypto.randomBytes(12).toString('hex') + ext;
-  const fs = require('fs');
   fs.renameSync(req.file.path, path.join(store.MEDIA_DIR, name));
   store.pushList(db.media, req.params.cid, { name, t: Date.now() }, 500);
   store.save();
@@ -320,6 +320,93 @@ app.get('/media/:name', (req, res) => {
   const name = String(req.params.name || '');
   if (!/^[a-f0-9]{24}\.(jpg|png|webp|bin)$/.test(name)) return res.status(400).json({ error: 'bad name' });
   res.sendFile(path.join(store.MEDIA_DIR, name));
+});
+
+// ---------------------------------------------------------------- child app apk share link
+// Parent uploads the child APK once (from the dashboard); the backend serves it at a
+// stable public link with a share token, so the child phone can download + install it.
+const APK_DIR = path.join(store.DATA_DIR, 'apk');
+const APK_FILE = path.join(APK_DIR, 'child.apk');
+const APK_META = path.join(APK_DIR, 'meta.json');
+fs.mkdirSync(APK_DIR, { recursive: true });
+
+function apkMeta() {
+  try { return JSON.parse(fs.readFileSync(APK_META, 'utf8')); } catch (e) { return null; }
+}
+
+function apkStatus() {
+  const m = apkMeta();
+  return {
+    uploaded: !!m,
+    url: m ? `/apk/child?t=${m.shareToken}` : '',
+    fileName: m ? m.originalName : '',
+    size: m ? m.size : 0,
+    uploadedAt: m ? m.uploadedAt : 0
+  };
+}
+
+const apkUpload = multer({ dest: APK_DIR, limits: { fileSize: 150 * 1024 * 1024 } });
+
+app.get('/api/apk', auth, parentOnly, (req, res) => {
+  res.json(apkStatus());
+});
+
+app.post('/api/apk', auth, parentOnly, apkUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'file required (.apk)' });
+  const name = String(req.file.originalname || '');
+  const isApk = name.toLowerCase().endsWith('.apk') ||
+    req.file.mimetype === 'application/vnd.android.package-archive';
+  if (!isApk) {
+    fs.unlinkSync(req.file.path);
+    return res.status(400).json({ error: 'only .apk files allowed' });
+  }
+  fs.renameSync(req.file.path, APK_FILE);
+  const meta = {
+    shareToken: crypto.randomBytes(8).toString('hex'),
+    originalName: name.slice(0, 120),
+    size: req.file.size,
+    uploadedAt: Date.now()
+  };
+  fs.writeFileSync(APK_META, JSON.stringify(meta));
+  res.json(apkStatus());
+});
+
+app.delete('/api/apk', auth, parentOnly, (req, res) => {
+  try { fs.unlinkSync(APK_FILE); } catch (e) {}
+  try { fs.unlinkSync(APK_META); } catch (e) {}
+  res.json({ ok: true });
+});
+
+// Public (token-protected): browser gets a landing page, ?dl=1 streams the APK.
+app.get('/apk/child', (req, res) => {
+  const m = apkMeta();
+  if (!m || !fs.existsSync(APK_FILE)) {
+    return res.status(404).send('<h2>FamilyGuard</h2><p>No child app uploaded yet. Parent dashboard se APK upload karo.</p>');
+  }
+  if (String(req.query.t || '') !== m.shareToken) {
+    return res.status(403).send('<h2>FamilyGuard</h2><p>Invalid or expired link — parent dashboard se fresh link lo.</p>');
+  }
+  const wantsPage = String(req.headers.accept || '').includes('text/html') && req.query.dl !== '1';
+  if (wantsPage) {
+    const sizeMb = (m.size / (1024 * 1024)).toFixed(1);
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FamilyGuard — Child App</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
+.c{max-width:430px;text-align:center;background:#111a2e;padding:28px;border-radius:16px}
+.btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 34px;border-radius:10px;font-size:17px;font-weight:600;margin:14px 0}
+.mut{color:#94a3b8;font-size:13px;line-height:1.6}h1{font-size:20px;margin:6px 0}</style></head>
+<body><div class="c"><div style="font-size:44px">🛡️</div><h1>FamilyGuard — Child App</h1>
+<p class="mut">${m.originalName} &middot; ${sizeMb} MB &middot; ${new Date(m.uploadedAt).toLocaleString()}</p>
+<a class="btn" href="?t=${m.shareToken}&amp;dl=1">⬇ Download APK</a>
+<p class="mut">Install karte waqt agar <b>"unknown apps blocked"</b> aaye to:<br><b>Settings → Allow from this source</b> enable karo → wapas aao → install.</p>
+<p class="mut">Install ke baad <b>Device Health</b> app kholo aur parent dashboard ka pairing code daalo.</p>
+</div></body></html>`);
+    return;
+  }
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', 'attachment; filename="familyguard-child.apk"');
+  res.setHeader('Content-Length', String(m.size));
+  fs.createReadStream(APK_FILE).pipe(res);
 });
 
 // ---------------------------------------------------------------- start

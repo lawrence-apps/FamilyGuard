@@ -148,6 +148,17 @@ fun MoreScreen(vm: MainViewModel, onLoggedOut: () -> Unit) {
             }
         }
 
+        Card(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ApkShareContent()
+            }
+        }
+
         Card(
             Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2))

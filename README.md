@@ -87,6 +87,13 @@ gradle assembleDebug -p parent-app
 gradle assembleDebug -p child-app
 ```
 
+**Child app ka permanent install link (parent dashboard se)**
+
+GitHub baar-baar kholne ki zarurat nahi:
+1. Parent dashboard (web ya app) → **📱 Child app — install link** → child APK ek baar **upload** karo.
+2. Backend link bana deta hai (`https://<server>/apk/child?t=…`) — **Copy / Share / QR**. 
+3. Child phone par link kholo → download → install → pairing code daalo. APK `/app/data` volume me rehta hai, redeploy ke baad bhi link chalta hai. Har naye APK par token rotate hota hai.
+
 ## 3) One-time setup (5 minutes)
 
 **Parent phone — FamilyGuard Parent**

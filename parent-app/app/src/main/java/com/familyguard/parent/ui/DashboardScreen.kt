@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddLocationAlt
+import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.Build
@@ -83,6 +84,7 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
     var showRelease by remember { mutableStateOf(false) }
     var showLock by remember { mutableStateOf(false) }
     var showMessage by remember { mutableStateOf(false) }
+    var showApk by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -131,7 +133,8 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
                 nav = nav,
                 onLock = { showLock = true },
                 onMessage = { showMessage = true },
-                onRelease = { showRelease = true }
+                onRelease = { showRelease = true },
+                onShareApk = { showApk = true }
             )
         }
 
@@ -164,6 +167,16 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
     }
     if (showLock) LockDialog(vm) { showLock = false }
     if (showMessage) MessageDialog(vm) { showMessage = false }
+    if (showApk) {
+        AlertDialog(
+            onDismissRequest = { showApk = false },
+            title = { Text("Child app install link") },
+            text = { ApkShareContent() },
+            confirmButton = {
+                TextButton(onClick = { showApk = false }) { Text("Close") }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -354,7 +367,8 @@ private fun QuickActions(
     nav: NavHostController,
     onLock: () -> Unit,
     onMessage: () -> Unit,
-    onRelease: () -> Unit
+    onRelease: () -> Unit,
+    onShareApk: () -> Unit
 ) {
     val actions = listOf(
         QuickAction("Locate", Icons.Outlined.LocationOn) { vm.sendCommand("locate_now") },
@@ -370,6 +384,7 @@ private fun QuickActions(
             vm.sendCommand("camera", JsonObject().apply { addProperty("facing", "back") })
         },
         QuickAction("Message", Icons.Outlined.Chat) { onMessage() },
+        QuickAction("Child app", Icons.Outlined.Android) { onShareApk() },
         QuickAction("Geofence", Icons.Outlined.AddLocationAlt) { nav.navigate("geofence") },
         QuickAction("Auto-Repair", Icons.Outlined.Build) { vm.sendCommand("heal") },
         QuickAction("Uninstall", Icons.Outlined.DeleteForever) { onRelease() },

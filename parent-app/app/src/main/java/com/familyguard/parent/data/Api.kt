@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -175,4 +176,25 @@ object Api {
             }
             call(builder("POST", "${baseUrl()}/api/commands", jsonBody(body)).build())
         }
+
+    // ---------- child app apk share link ----------
+
+    suspend fun apkInfo(): ApkInfo = withContext(Dispatchers.IO) {
+        call(builder("GET", "${baseUrl()}/api/apk").build())
+    }
+
+    suspend fun uploadApk(bytes: ByteArray, fileName: String): ApkInfo = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "file", fileName,
+                bytes.toRequestBody("application/vnd.android.package-archive".toMediaType())
+            )
+            .build()
+        call(builder("POST", "${baseUrl()}/api/apk", body).build())
+    }
+
+    suspend fun deleteApk(): OkResp = withContext(Dispatchers.IO) {
+        call(builder("DELETE", "${baseUrl()}/api/apk").build())
+    }
 }

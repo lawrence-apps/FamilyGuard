@@ -164,6 +164,14 @@ data class CmdIdResp(val id: String = "")
 
 data class MediaResp(val url: String = "")
 
+data class ApkInfo(
+    val uploaded: Boolean = false,
+    val url: String = "",
+    val fileName: String = "",
+    val size: Long = 0,
+    val uploadedAt: Long = 0
+)
+
 data class MeResp(
     val role: String = "",
     val username: String = "",
