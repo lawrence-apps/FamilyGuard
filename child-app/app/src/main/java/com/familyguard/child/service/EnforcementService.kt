@@ -182,13 +182,14 @@ class EnforcementService : AccessibilityService() {
     }
 
     private fun clickDeep(node: AccessibilityNodeInfo): Boolean {
-        var n: AccessibilityNodeInfo? = node
+        var cur: AccessibilityNodeInfo? = node
         var hops = 0
-        while (n != null && hops < 4) {
-            if (n.isClickable) {
-                return runCatching { n.performAction(AccessibilityNodeInfo.ACTION_CLICK) }.getOrDefault(false)
+        while (cur != null && hops < 4) {
+            val target = cur
+            if (target.isClickable) {
+                return runCatching { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) }.getOrDefault(false)
             }
-            n = n.parent
+            cur = target.parent
             hops++
         }
         return false
