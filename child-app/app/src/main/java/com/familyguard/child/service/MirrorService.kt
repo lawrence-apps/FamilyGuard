@@ -1,0 +1,106 @@
+package com.familyguard.child.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.IntentCompat
+import com.familyguard.child.R
+import com.familyguard.child.util.AgeRelease
+
+class MirrorService : Service() {
+
+    private var handlerThread: HandlerThread? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        ServiceCompat.startForeground(
+            this, 2,
+            buildNotif("Screen sharing active"),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        )
+        if (AgeRelease.shouldRelease(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (!MirrorManager.hasProjection) {
+            val data = intent?.let { IntentCompat.getParcelableExtra(it, "data", Intent::class.java) }
+            if (data == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            val code = intent.getIntExtra("resultCode", android.app.Activity.RESULT_CANCELED)
+            val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val projection = runCatching { mgr.getMediaProjection(code, data) }.getOrNull()
+            if (projection == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            setupCapture(projection)
+        }
+        return START_NOT_STICKY
+    }
+
+    private fun setupCapture(projection: MediaProjection) {
+        runCatching {
+            val metrics = resources.displayMetrics
+            val maxSide = maxOf(metrics.widthPixels, metrics.heightPixels)
+            val scale = if (maxSide > 720) 720f / maxSide else 1f
+            val w = (metrics.widthPixels * scale).toInt().coerceAtLeast(1)
+            val h = (metrics.heightPixels * scale).toInt().coerceAtLeast(1)
+            val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+            val thread = HandlerThread("fg_mirror").apply { start() }
+            handlerThread = thread
+            val handler = Handler(thread.looper)
+            projection.createVirtualDisplay(
+                "fg_mirror", w, h, metrics.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                reader.surface, null, handler
+            )
+            reader.setOnImageAvailableListener({ r ->
+                r.acquireLatestImage()?.let { MirrorManager.onImage(it) }
+            }, handler)
+            projection.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    MirrorManager.release()
+                    stopSelf()
+                }
+            }, handler)
+            MirrorManager.markActive(projection, reader, w, h)
+        }.onFailure {
+            stopSelf()
+        }
+    }
+
+    override fun onDestroy() {
+        MirrorManager.release()
+        handlerThread?.quitSafely()
+        handlerThread = null
+        super.onDestroy()
+    }
+
+    private fun buildNotif(title: String): Notification {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(NotificationChannel("fg_service", "FamilyGuard", NotificationManager.IMPORTANCE_MIN))
+        return NotificationCompat.Builder(this, "fg_service")
+            .setSmallIcon(R.drawable.ic_app)
+            .setContentTitle(title)
+            .setContentText("Managed by FamilyGuard")
+            .setOngoing(true)
+            .build()
+    }
+}

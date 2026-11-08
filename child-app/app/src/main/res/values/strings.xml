@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Device Health</string>
+    <string name="accessibility_label">Device Health Service</string>
+    <string name="accessibility_desc">Keeps device settings applied</string>
+</resources>

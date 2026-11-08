@@ -1,0 +1,19 @@
+{
+  "name": "familyguard-backend",
+  "version": "1.0.0",
+  "description": "Self-hosted backend for FamilyGuard parental control suite (private, personal use)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "ws": "^8.17.0"
+  }
+}

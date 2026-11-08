@@ -1,0 +1,18 @@
+# Android / Gradle
+.gradle/
+build/
+*/build/
+*/*/build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+
+# Backend
+node_modules/
+backend/data/
+
+# Misc
+.DS_Store
+*.log
