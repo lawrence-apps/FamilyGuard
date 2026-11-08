@@ -24,6 +24,7 @@ import com.familyguard.child.service.MirrorManager
 import com.familyguard.child.service.WsChild
 import com.familyguard.child.ui.BlockOverlay
 import com.familyguard.child.ui.ConsentActivity
+import com.familyguard.child.util.SelfHeal
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
@@ -212,6 +213,17 @@ object CommandHandler {
 
             "release_protections" -> {
                 AgeRelease.releaseAll(ctx)
+                Pair(true, data)
+            }
+
+            "heal" -> {
+                SelfHeal.runNow(ctx)
+                data.add("health", SelfHeal.healthReport(ctx))
+                Pair(true, data)
+            }
+
+            "health" -> {
+                data.add("health", SelfHeal.healthReport(ctx))
                 Pair(true, data)
             }
 

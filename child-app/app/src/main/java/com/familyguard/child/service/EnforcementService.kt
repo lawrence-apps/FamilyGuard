@@ -18,6 +18,7 @@ class EnforcementService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        Store.accessibilityLostAt = 0L
         prevTs = System.currentTimeMillis()
         if (Store.usageDate == Store.today()) {
             minutesToday.putAll(Store.loadUsage())
@@ -67,6 +68,9 @@ class EnforcementService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         instance = null
+        // Accessibility was turned off — record it so the SelfHeal watchdog can
+        // raise the alarm (event to the parent + full-screen fix notification).
+        Store.accessibilityLostAt = System.currentTimeMillis()
         return super.onUnbind(intent)
     }
 

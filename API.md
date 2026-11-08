@@ -90,6 +90,8 @@ Actions:
 | `get_apps` | `{}` | `{}` (apps come as WS `apps` message) |
 | `message` | `{title, text}` | `{}` |
 | `release_protections` | `{}` | `{}` — child app disables its accessibility + device admin, stops all services/clears rules, posts event `released`, and fires the system uninstall dialog (re-fired on boot/app open until uninstalled). Parent can trigger anytime (e.g. child turns 18). |
+| `heal` | `{}` | Runs the child self-heal watchdog: revives the foreground service, reconnects WS, re-schedules the sync worker, re-posts fix prompts for broken permissions. Returns `{health:{...}}`. |
+| `health` | `{}` | Read-only: returns `{health:{...}}` snapshot without side effects. |
 
 ### Media
 - `POST /api/media/:cid` (child or parent) multipart field `file` → `{url:"/media/<name>"}`
@@ -107,7 +109,7 @@ Actions:
 
 ### Child → server (JSON text frames)
 - `{type:"hello"}` (implicit on connect; server replies `{type:"hello", rules, geofences}` and flushes queued commands)
-- `{type:"status", battery:87, charging:true, currentApp:"com.android.chrome"}` → stored + pushed to parents
+- `{type:"status", battery:87, charging:true, currentApp:"com.android.chrome", health:{service:true, ws:true, accessibility:true, admin:true, notifListener:true, usageAccess:true, overlay:true, location:true, camera:true, notifications:true, mirrorReady:false}}` → stored + pushed to parents (health is optional; sent every 60 s and on each watchdog cycle)
 - `{type:"location", lat, lng, accuracy, speed, battery}` → stored + pushed to parents
 - `{type:"notification", pkg, title, text, date}` → stored + pushed to parents
 - `{type:"event", type:"geofence_enter", data:{}}` → stored + pushed to parents
@@ -128,7 +130,7 @@ Actions:
 - `{type:"mirror_stop", cid}` → sends `mirror_stop` command
 
 ### Server → parent
-- `{type:"child_status", cid, online, battery, charging, currentApp, lastSeen}`
+- `{type:"child_status", cid, online, battery, charging, currentApp, health, lastSeen}` (health = last snapshot or null)
 - `{type:"location", cid, point:{lat,lng,accuracy,speed,t,battery}}`
 - `{type:"notification", cid, notif:{pkg,title,text,date}}`
 - `{type:"event", cid, event:{id,type,data,t}}`

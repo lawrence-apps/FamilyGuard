@@ -20,8 +20,10 @@ import androidx.core.content.ContextCompat
 import com.familyguard.child.R
 import com.familyguard.child.RulesEngine
 import com.familyguard.child.data.Api
+import com.familyguard.child.data.Store
 import com.familyguard.child.util.AgeRelease
 import com.familyguard.child.util.CommandHandler
+import com.familyguard.child.util.SelfHeal
 import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,10 +37,22 @@ class MainService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    companion object {
+        /** True while the foreground service is alive; used by the SelfHeal watchdog. */
+        @Volatile
+        var running: Boolean = false
+
+        /** Last statusLoop tick (elapsedRealtime); lets others detect a wedged service. */
+        @Volatile
+        var lastBeat: Long = 0L
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        running = true
+        lastBeat = SystemClock.elapsedRealtime()
         ensureChannel()
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -98,7 +112,25 @@ class MainService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         WsChild.disconnect()
+        // Self-heal: if the system (or the child) killed this service while still
+        // paired and not released, schedule an automatic restart 3 s from now.
+        // The exact alarm puts the app on the temporary allowlist, so the
+        // foreground-service start is legal even from the background.
+        if (Store.paired && !Store.released) {
+            runCatching {
+                val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                val pi = PendingIntent.getForegroundService(
+                    this, 102, Intent(this, MainService::class.java),
+                    PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+                )
+                am.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + 3000, pi
+                )
+            }
+        }
         super.onDestroy()
     }
 
@@ -128,12 +160,14 @@ class MainService : Service() {
     private suspend fun statusLoop() {
         while (coroutineContext.isActive) {
             delay(60_000)
+            lastBeat = SystemClock.elapsedRealtime()
             runCatching {
                 val m = JsonObject()
                 m.addProperty("type", "status")
                 m.addProperty("battery", batteryLevel())
                 m.addProperty("charging", isCharging())
                 m.addProperty("currentApp", EnforcementService.lastApp)
+                m.add("health", SelfHeal.healthReport(this@MainService))
                 WsChild.send(m.toString())
             }
         }

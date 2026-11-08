@@ -163,6 +163,23 @@ function renderStatus() {
   $("s-batt").textContent = c.battery >= 0 ? c.battery + "%" + (c.charging ? " ⚡" : "") : "—";
   $("s-app").textContent = c.currentApp || "—";
   $("s-seen").textContent = timeAgo(c.lastSeen);
+  const h = c.health;
+  const labels = {
+    service: "Background service", accessibility: "Accessibility", admin: "Device admin",
+    location: "Location", usageAccess: "Usage access", overlay: "Overlay",
+    camera: "Camera", notifListener: "Notifications"
+  };
+  const broken = h ? Object.keys(labels).filter((k) => h[k] === false).map((k) => labels[k]) : [];
+  const el = $("s-health");
+  if (broken.length) {
+    el.classList.remove("hidden");
+    el.innerHTML = "<b>Needs repair:</b> " + broken.join(", ") +
+      ' — the child device self-heals; <button class="btn small" id="heal-btn">Auto-Repair</button>';
+    const hb = document.getElementById("heal-btn");
+    if (hb) hb.onclick = () => sendCmd("heal", {});
+  } else {
+    el.classList.add("hidden");
+  }
 }
 
 function renderPairCard() {
@@ -257,6 +274,7 @@ function handleWs(m) {
       const c = S.children.find((x) => x.id === m.cid);
       if (c) {
         c.online = m.online; c.battery = m.battery; c.charging = m.charging; c.currentApp = m.currentApp;
+        if (m.health) c.health = m.health;
       }
       renderStatus(); renderChildSelect();
       break;

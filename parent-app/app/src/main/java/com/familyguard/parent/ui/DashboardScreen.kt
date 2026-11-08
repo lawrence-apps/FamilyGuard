@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddLocationAlt
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.BatteryFull
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Lock
@@ -118,7 +119,8 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
             StatusCard(
                 child = child,
                 st = statusMap[child.id],
-                onRegenerate = { vm.regenerate(child.id) { } }
+                onRegenerate = { vm.regenerate(child.id) { } },
+                onRepair = { vm.sendCommand("heal") }
             )
             if (child.ageYears() >= 18) {
                 ReleaseBanner(onRelease = { showRelease = true })
@@ -200,12 +202,13 @@ private fun ChildSelector(children: List<Child>, selectedId: String, onSelect: (
 }
 
 @Composable
-private fun StatusCard(child: Child, st: StatusUi?, onRegenerate: () -> Unit) {
+private fun StatusCard(child: Child, st: StatusUi?, onRegenerate: () -> Unit, onRepair: () -> Unit) {
     val ui = st ?: StatusUi(
         online = child.online,
         battery = child.battery,
         charging = false,
-        currentApp = child.currentApp
+        currentApp = child.currentApp,
+        health = child.health
     )
     Card(Modifier.fillMaxWidth()) {
         Column(
@@ -238,6 +241,7 @@ private fun StatusCard(child: Child, st: StatusUi?, onRegenerate: () -> Unit) {
             if (ui.currentApp.isNotBlank()) {
                 Text("Current app: ${ui.currentApp}", fontSize = 13.sp)
             }
+            RepairBanner(ui.health, onRepair)
             if (child.lastSeen > 0) {
                 Text(
                     "Last seen: " + DateUtils.getRelativeTimeSpanString(child.lastSeen).toString(),
@@ -264,6 +268,56 @@ private fun StatusCard(child: Child, st: StatusUi?, onRegenerate: () -> Unit) {
                 )
                 TextButton(onClick = onRegenerate) { Text("Generate new code") }
             }
+        }
+    }
+}
+
+/** Broken-check keys shown to the parent with human labels. */
+private val HEALTH_LABELS = mapOf(
+    "service" to "Background service",
+    "accessibility" to "Accessibility",
+    "admin" to "Device admin",
+    "location" to "Location",
+    "usageAccess" to "Usage access",
+    "overlay" to "Overlay",
+    "camera" to "Camera",
+    "notifListener" to "Notifications"
+)
+
+private fun brokenItems(health: JsonObject?): List<String> {
+    if (health == null) return emptyList()
+    return HEALTH_LABELS.mapNotNull { (key, label) ->
+        val v = health.get(key)?.takeIf { it.isJsonPrimitive }?.asBoolean ?: return@mapNotNull null
+        if (!v) label else null
+    }
+}
+
+@Composable
+private fun RepairBanner(health: JsonObject?, onRepair: () -> Unit) {
+    val broken = remember(health) { brokenItems(health) }
+    if (broken.isEmpty()) return
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2))
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Needs repair: ${broken.joinToString(", ")}",
+                fontSize = 13.sp,
+                color = Color(0xFFB91C1C),
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Auto-Repair restarts the child device services and pops a fix prompt on the child's phone — no need to take the phone.",
+                fontSize = 12.sp,
+                color = Color(0xFF7F1D1D)
+            )
+            Button(onClick = onRepair) { Text("Auto-Repair") }
         }
     }
 }
@@ -314,6 +368,7 @@ private fun QuickActions(
         },
         QuickAction("Message", Icons.Outlined.Chat) { onMessage() },
         QuickAction("Geofence", Icons.Outlined.AddLocationAlt) { nav.navigate("geofence") },
+        QuickAction("Auto-Repair", Icons.Outlined.Build) { vm.sendCommand("heal") },
         QuickAction("More tools", Icons.Outlined.Tune) { nav.navigate("remote") }
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

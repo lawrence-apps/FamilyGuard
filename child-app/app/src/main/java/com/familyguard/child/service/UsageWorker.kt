@@ -21,6 +21,7 @@ import com.familyguard.child.data.Api
 import com.familyguard.child.data.Store
 import com.familyguard.child.data.UsagePost
 import com.familyguard.child.util.AgeRelease
+import com.familyguard.child.util.SelfHeal
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import java.util.Calendar
@@ -36,6 +37,11 @@ class UsageWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
             return Result.success()
         }
         if (Store.cid.isBlank()) return Result.success()
+
+        // Watchdog: this worker also runs right after boot, so use every cycle to
+        // revive a killed service, reconnect the websocket and report health —
+        // the child device heals itself without ever being touched again.
+        runCatching { SelfHeal.runNow(ctx) }
 
         runCatching { Api.me() }.onFailure { e ->
             // Pairing token no longer valid on the server (e.g. server DB reset).

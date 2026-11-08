@@ -25,7 +25,8 @@ sealed class WsEvent {
         val online: Boolean,
         val battery: Int,
         val charging: Boolean,
-        val currentApp: String
+        val currentApp: String,
+        val health: JsonObject? = null
     ) : WsEvent()
 
     data class Location(val cid: String, val point: LocPoint) : WsEvent()
@@ -138,7 +139,8 @@ class WsManager {
                     online = obj.bool("online"),
                     battery = obj.int("battery"),
                     charging = obj.bool("charging"),
-                    currentApp = obj.str("currentApp")
+                    currentApp = obj.str("currentApp"),
+                    health = obj.optObj("health")
                 )
             )
             "location" -> {

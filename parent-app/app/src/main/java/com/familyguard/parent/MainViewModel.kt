@@ -65,11 +65,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     online = ev.online,
                     battery = ev.battery,
                     charging = ev.charging,
-                    currentApp = ev.currentApp
+                    currentApp = ev.currentApp,
+                    health = ev.health ?: status.value[ev.cid]?.health
                 ))
                 children.value = children.value.map {
                     if (it.id == ev.cid) {
-                        it.copy(online = ev.online, battery = ev.battery, currentApp = ev.currentApp)
+                        it.copy(online = ev.online, battery = ev.battery, currentApp = ev.currentApp, health = ev.health ?: it.health)
                     } else {
                         it
                     }

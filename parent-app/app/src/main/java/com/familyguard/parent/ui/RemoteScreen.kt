@@ -90,6 +90,23 @@ fun RemoteScreen(vm: MainViewModel) {
             modifier = Modifier.fillMaxWidth()
         ) { Text("Send message") }
 
+        Text("Self-healing", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "If anything breaks on the child device, Auto-Repair restarts its services and shows a fix prompt there — the phone never has to be taken again.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { vm.sendCommand("heal") },
+                modifier = Modifier.weight(1f)
+            ) { Text("Auto-Repair") }
+            OutlinedButton(
+                onClick = { vm.sendCommand("health") },
+                modifier = Modifier.weight(1f)
+            ) { Text("Check health") }
+        }
+
         if (lastResult.isNotBlank()) {
             Text(
                 "Last result: $lastResult",

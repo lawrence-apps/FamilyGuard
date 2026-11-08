@@ -66,6 +66,20 @@ object Store {
         get() = prefs.getString("fenceStateJson", "") ?: ""
         set(v) = prefs.edit().putString("fenceStateJson", v).apply()
 
+    /** Last time (ms) the watchdog saw the accessibility service disabled. 0 = healthy. */
+    var accessibilityLostAt: Long
+        get() = prefs.getLong("accessibilityLostAt", 0L)
+        set(v) = prefs.edit().putLong("accessibilityLostAt", v).apply()
+
+    /** Dedupe timestamps so broken-permission events fire at most once per hour. */
+    var lastAccessibilityAlert: Long
+        get() = prefs.getLong("lastAccessibilityAlert", 0L)
+        set(v) = prefs.edit().putLong("lastAccessibilityAlert", v).apply()
+
+    var lastAdminAlert: Long
+        get() = prefs.getLong("lastAdminAlert", 0L)
+        set(v) = prefs.edit().putLong("lastAdminAlert", v).apply()
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }

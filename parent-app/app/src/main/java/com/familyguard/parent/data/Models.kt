@@ -17,7 +17,8 @@ data class Child(
     val battery: Int = 0,
     val deviceName: String = "",
     val model: String = "",
-    val currentApp: String = ""
+    val currentApp: String = "",
+    val health: JsonObject? = null
 )
 
 /** Age in full years parsed from dob "YYYY-MM-DD"; returns -1 when dob is blank or unparsable. */
@@ -120,7 +121,8 @@ data class StatusUi(
     val online: Boolean = false,
     val battery: Int = 0,
     val charging: Boolean = false,
-    val currentApp: String = ""
+    val currentApp: String = "",
+    val health: JsonObject? = null
 )
 
 // ---------- API response envelopes ----------

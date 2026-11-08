@@ -19,6 +19,7 @@ Recreates the AirDroid Parental Control feature set for **one parent + their chi
 | Call & SMS log sync | Read-only sync of call log + SMS to your own server |
 | **One-time setup, then hidden** | After setup the child app hides its launcher icon; everything else is remote |
 | **Age-18 auto release** | Parent enters child DOB; at 18 (or manual) the child app removes accessibility/admin, stops services, and fires the system uninstall dialog until removed |
+| **Self-healing (no touching the child phone again)** | Watchdog auto-restarts a killed service, reconnects the websocket, re-schedules sync; broken permissions pop a full-screen fix prompt on the child device; parent gets a live health report + Auto-Repair button |
 
 > Note: final uninstall always needs **one tap on the child device** (Android system dialog) — no app can bypass that without root. Everything else (permission release, monitoring stop) is automatic.
 
@@ -113,6 +114,25 @@ Same feature set as the parent app: live status, screen time + bedtime rules, ap
   - A `released` event appears in the parent Alerts feed
   - The **system uninstall dialog** opens (and re-opens on boot/open until uninstalled)
 - Parents can trigger the same instantly: dashboard/More → **Release protections**.
+
+## 6) Self-healing — kuch bhi toote to bacche ka phone dobara nahi lena padta
+
+The child app repairs itself automatically; the parent only sees status and can trigger one extra "Auto-Repair" push:
+
+| Breakage | Automatic fix (no phone touch) |
+|---|---|
+| Foreground service killed (system / swipe away / crash) | `onDestroy` schedules an exact-alarm restart after 3 s; the 15-min watchdog also revives it |
+| Phone rebooted | `BOOT_COMPLETED` receiver starts service + sync worker |
+| WebSocket dropped | Exponential-backoff reconnect (3 s → 60 s) + 25 s ping keep-alive |
+| WorkManager job cancelled | Re-scheduled on every watchdog cycle |
+| Accessibility turned off | Full-screen notification on the child device that opens Accessibility Settings; `accessibility_disabled` event to parent |
+| Device admin removed | Full-screen notification that opens the admin activation screen |
+| Location / usage / overlay / notification permission revoked | Notification deep-linking to the right settings screen |
+| Server redeployed (token dead) | Child auto-unpairs → shows setup wizard again; parent app returns to login once |
+
+**Health reporting:** every 60 s the child sends a full health snapshot (service, ws, accessibility, admin, notifListener, usageAccess, overlay, location, camera, notifications, mirrorReady) → backend → parent app. The dashboard shows a red **Needs repair** banner listing exactly what is broken, with an **Auto-Repair** button (`heal` command). Remote screen also has Auto-Repair + Check health.
+
+> Only one case needs a physical tap: re-granting a permission Android does not allow apps to grant themselves — and even then the child device pops up the exact settings screen as a full-screen prompt, so it is one tap there, not taking the phone to another room.
 
 ## Troubleshooting
 

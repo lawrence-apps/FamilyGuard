@@ -36,7 +36,8 @@ function publicChild(c) {
     id: c.id, name: c.name, dob: c.dob || '', paired: !!c.paired,
     pairingCode: c.pairingCode, online: isOnline(c.id), lastSeen: c.lastSeen || 0,
     battery: c.battery == null ? -1 : c.battery, charging: !!c.charging,
-    deviceName: c.deviceName || '', model: c.model || '', currentApp: c.currentApp || ''
+    deviceName: c.deviceName || '', model: c.model || '', currentApp: c.currentApp || '',
+    health: c.health || null
   };
 }
 
@@ -88,8 +89,9 @@ function handleChildMessage(cid, msg, raw) {
       if (typeof msg.battery === 'number') c.battery = msg.battery;
       if (typeof msg.charging === 'boolean') c.charging = msg.charging;
       if (typeof msg.currentApp === 'string') c.currentApp = msg.currentApp;
+      if (msg.health && typeof msg.health === 'object' && !Array.isArray(msg.health)) c.health = msg.health;
       store.save();
-      broadcastToParents({ type: 'child_status', cid, online: true, battery: c.battery, charging: c.charging, currentApp: c.currentApp, lastSeen: c.lastSeen });
+      broadcastToParents({ type: 'child_status', cid, online: true, battery: c.battery, charging: c.charging, currentApp: c.currentApp, health: c.health || null, lastSeen: c.lastSeen });
       break;
     }
     case 'location': {
