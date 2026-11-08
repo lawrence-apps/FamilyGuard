@@ -37,9 +37,10 @@ const EXT_BY_TYPE = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '
 app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'familyguard-backend', children: db.children.length, parents: db.parents.length, uptime: process.uptime() });
 });
-app.get('/', (req, res) => {
-  res.type('html').send('<html><body style="font-family:sans-serif"><h3>FamilyGuard backend is running ✔</h3><p>Apps talk to <code>/api/...</code> and <code>/ws</code>. See API.md.</p></body></html>');
-});
+
+// Web dashboard (works on iPhone/Android/desktop browsers — no app needed)
+app.use('/app', express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => res.redirect('/app/'));
 
 // ---------------------------------------------------------------- parent auth
 app.post('/api/parent/register', async (req, res) => {

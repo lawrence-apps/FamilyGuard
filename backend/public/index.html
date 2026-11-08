@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FamilyGuard">
+<title>FamilyGuard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563EB' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- ============ AUTH ============ -->
+<div id="auth" class="screen">
+  <div class="auth-card">
+    <div class="shield">🛡️</div>
+    <h1>FamilyGuard</h1>
+    <p class="sub">Self-hosted parental control</p>
+    <label>Username</label>
+    <input id="a-user" autocomplete="username" placeholder="parent">
+    <label>Password</label>
+    <input id="a-pass" type="password" autocomplete="current-password" placeholder="••••••">
+    <div class="row">
+      <button id="a-login" class="btn primary">Login</button>
+      <button id="a-reg" class="btn">Register</button>
+    </div>
+    <div id="a-err" class="err"></div>
+    <p class="hint">Server: <span id="a-origin"></span></p>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="screen hidden">
+  <header>
+    <div>
+      <h1>FamilyGuard</h1>
+      <div class="child-line">
+        <select id="child-sel"></select>
+        <span id="conn" class="dot off" title="connection"></span>
+      </div>
+    </div>
+    <button id="logout" class="btn small">Logout</button>
+  </header>
+
+  <main id="main">
+    <!-- HOME -->
+    <section id="tab-home" class="tab">
+      <div class="card" id="status-card">
+        <div class="status-grid">
+          <div><span class="lbl">Status</span><span id="s-online">—</span></div>
+          <div><span class="lbl">Battery</span><span id="s-batt">—</span></div>
+          <div><span class="lbl">Current app</span><span id="s-app" class="small">—</span></div>
+          <div><span class="lbl">Last seen</span><span id="s-seen">—</span></div>
+        </div>
+      </div>
+      <div class="card hidden" id="pair-card">
+        <h3>Pair the child device</h3>
+        <p>Open the <b>Device Health</b> app on the child phone (one-time setup) and enter this code:</p>
+        <div class="code" id="pair-code">—</div>
+        <div class="row">
+          <button id="regen-code" class="btn small">New code</button>
+          <button id="new-child" class="btn small">+ New child</button>
+        </div>
+      </div>
+      <h3>Quick actions</h3>
+      <div class="grid" id="quick-grid">
+        <button data-cmd="locate_now">📍 Locate now</button>
+        <button data-cmd="ring">🔔 Ring</button>
+        <button data-cmd="lock">🔒 Lock</button>
+        <button data-cmd="unlock">🔓 Unlock</button>
+        <button data-cmd="screenshot">📸 Screenshot</button>
+        <button data-cmd="cam-front">🤳 Camera front</button>
+        <button data-cmd="cam-back">📷 Camera back</button>
+        <button data-cmd="message">💬 Message</button>
+        <button data-cmd="show_app_icon">👁 Show child app icon</button>
+        <button data-cmd="hide_app_icon">🫥 Hide child app icon</button>
+      </div>
+      <div class="card hidden" id="media-card">
+        <h3>Last capture</h3>
+        <img id="media-img" alt="capture">
+        <div id="cmd-status" class="small muted"></div>
+      </div>
+      <div class="card hidden amber" id="adult-card">
+        ⚠️ Child is 18+. You can release all protections — the child app will uninstall itself.
+        <button id="release-btn" class="btn danger">Release protections</button>
+      </div>
+    </section>
+
+    <!-- TIME -->
+    <section id="tab-time" class="tab hidden">
+      <div class="card">
+        <h3>Today's usage</h3>
+        <div class="bar"><div id="usage-fill"></div></div>
+        <p class="small" id="usage-text">—</p>
+      </div>
+      <div class="card">
+        <h3>Daily screen time limit</h3>
+        <div class="row">
+          <input id="r-daily" type="number" min="0" max="720" step="15"> <span>min/day (0 = unlimited)</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Bedtime</h3>
+        <label class="switch-row"><input type="checkbox" id="r-bed-en"> Enabled</label>
+        <div class="row">
+          <div><label>From</label><input id="r-bed-start" type="time" value="21:30"></div>
+          <div><label>To</label><input id="r-bed-end" type="time" value="07:00"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Blocked apps <span class="muted small">(package name)</span></h3>
+        <ul id="r-blocked" class="chip-list"></ul>
+        <div class="row">
+          <input id="r-blocked-in" placeholder="com.instagram.android">
+          <button id="r-blocked-add" class="btn small">Add</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Per-app daily limits</h3>
+        <ul id="r-limits" class="chip-list"></ul>
+        <div class="row">
+          <input id="r-limit-pkg" placeholder="com.google.android.youtube" style="flex:2">
+          <input id="r-limit-min" type="number" placeholder="60" min="1" style="flex:1">
+          <button id="r-limit-add" class="btn small">Add</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Always allowed</h3>
+        <ul id="r-allowed" class="chip-list"></ul>
+        <div class="row">
+          <input id="r-allowed-in" placeholder="com.whatsapp">
+          <button id="r-allowed-add" class="btn small">Add</button>
+        </div>
+      </div>
+      <button id="save-rules" class="btn primary wide">Save & push to child</button>
+    </section>
+
+    <!-- APPS -->
+    <section id="tab-apps" class="tab hidden">
+      <p class="muted small">App list syncs from the child device. Usage = today.</p>
+      <div id="apps-list"></div>
+    </section>
+
+    <!-- MAP -->
+    <section id="tab-map" class="tab hidden">
+      <div id="map"></div>
+      <div class="card">
+        <h3>Geofences</h3>
+        <p class="muted small">Tap on the map to place a new safe zone.</p>
+        <ul id="fence-list" class="chip-list"></ul>
+      </div>
+    </section>
+
+    <!-- MIRROR -->
+    <section id="tab-mirror" class="tab hidden">
+      <div class="row">
+        <button id="mirror-start" class="btn primary">▶ Start mirroring</button>
+        <button id="mirror-stop" class="btn danger hidden">■ Stop</button>
+        <span id="mirror-fps" class="muted small"></span>
+      </div>
+      <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
+      <p class="muted small">Child device me screen capture ek baar allow karna hota hai (setup step 8). Reboot ke baad dobara permission chahiye ho toh child phone par ek dialog aayega.</p>
+    </section>
+
+    <!-- ALERTS -->
+    <section id="tab-alerts" class="tab hidden">
+      <h3>Events</h3>
+      <ul id="events-list" class="feed"></ul>
+      <h3>Notifications from child</h3>
+      <ul id="notifs-list" class="feed"></ul>
+    </section>
+
+    <!-- LOGS -->
+    <section id="tab-logs" class="tab hidden">
+      <h3>Call log</h3>
+      <ul id="calls-list" class="feed"></ul>
+      <h3>SMS</h3>
+      <ul id="sms-list" class="feed"></ul>
+    </section>
+
+    <!-- MORE -->
+    <section id="tab-more" class="tab hidden">
+      <div class="card">
+        <h3>Children</h3>
+        <ul id="children-list" class="chip-list"></ul>
+        <button id="new-child-2" class="btn small">+ Add child</button>
+      </div>
+      <div class="card">
+        <h3>Danger zone</h3>
+        <p class="muted small">Release disables accessibility + admin, stops monitoring and fires the system uninstall dialog on the child device (also automatic at age 18).</p>
+        <button id="release-btn-2" class="btn danger">Release protections now</button>
+      </div>
+      <div class="card">
+        <h3>About</h3>
+        <p class="small muted">FamilyGuard v1.0 — private, self-hosted. Personal use only.<br>Server: <span id="about-origin"></span></p>
+      </div>
+    </section>
+  </main>
+
+  <nav id="nav">
+    <button data-tab="home" class="on">🏠<span>Home</span></button>
+    <button data-tab="time">⏳<span>Time</span></button>
+    <button data-tab="apps">📱<span>Apps</span></button>
+    <button data-tab="map">🗺️<span>Map</span></button>
+    <button data-tab="mirror">🪞<span>Mirror</span></button>
+    <button data-tab="alerts">🔔<span>Alerts</span></button>
+    <button data-tab="logs">☎️<span>Logs</span></button>
+    <button data-tab="more">⚙️<span>More</span></button>
+  </nav>
+</div>
+
+<!-- dialog -->
+<div id="dlg" class="modal hidden">
+  <div class="modal-card">
+    <h3 id="dlg-title"></h3>
+    <div id="dlg-body"></div>
+    <div class="row right">
+      <button id="dlg-cancel" class="btn small">Cancel</button>
+      <button id="dlg-ok" class="btn primary small">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

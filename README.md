@@ -85,7 +85,13 @@ Done — **you never touch the child phone again.** Everything (limits, blocked 
 - Dial `*#*#2724#*#*` on the child phone, **or**
 - Parent app → More → **Show child app icon** (remote command), hide it again anytime.
 
-## 4) Age-18 automatic release
+## 4) Web dashboard for iPhone / any browser (no app needed)
+
+Open **`https://your-server.example.com/app`** (backend serves it automatically) — on iPhone: Safari → Share → **Add to Home Screen** for a full-screen app experience.
+
+Same feature set as the parent app: live status, screen time + bedtime rules, app blocking, live map + geofences, **screen mirroring**, remote camera/screenshot/lock/ring, alerts feed, call/SMS logs, children management and the 18+ release control. Login is the same parent account (register once).
+
+## 5) Age-18 automatic release
 
 - When the child's DOB date passes 18 years (checked on boot, app open, and every 15-min sync):
   - Accessibility + Device admin are removed, services stop, rules cleared
