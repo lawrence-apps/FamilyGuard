@@ -17,6 +17,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
@@ -73,12 +74,34 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleDeepLink(intent)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Root()
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    /** familyguard://pair?server=https://host&code=123456 — prefills the wizard
+     *  (and auto-pairs) so the QR scan needs zero typing. */
+    private fun handleDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "familyguard" || data.host != "pair") return
+        if (Store.paired) return
+        val server = data.getQueryParameter("server")?.trim().orEmpty()
+        val code = data.getQueryParameter("code")?.trim().orEmpty().filter { it.isDigit() }.take(6)
+        if (server.isNotBlank() && (server.startsWith("http://") || server.startsWith("https://"))) {
+            Store.pendingPairServer = server
+        }
+        if (code.length == 6) {
+            Store.pendingPairCode = code
         }
     }
 
@@ -126,6 +149,76 @@ class MainActivity : ComponentActivity() {
             ctx.startActivity(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + ctx.packageName))
             )
+        }
+    }
+
+    /** One-tap walkthrough: opens each missing permission screen in order and lets
+     *  EnforcementService auto-click the dialogs/toggles (needs accessibility ON).
+     *  Without accessibility it still walks every screen — the user just taps Allow
+     *  on each one. Returns a short status line for the UI. */
+    private suspend fun autoGrantSequence(
+        ctx: Context,
+        locLauncher: ActivityResultLauncher<Array<String>>,
+        camLauncher: ActivityResultLauncher<String>,
+        callsLauncher: ActivityResultLauncher<Array<String>>,
+        onProgress: (String) -> Unit
+    ): String {
+        data class AutoStep(val key: String, val done: () -> Boolean, val launch: () -> Unit)
+        val adminIntent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            .putExtra(
+                android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                ComponentName(ctx, AdminReceiver::class.java)
+            )
+            .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Allows remote screen lock")
+        val steps = listOf(
+            AutoStep("loc", { hasLocation(ctx) }, {
+                locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            }),
+            AutoStep("usage", { hasUsageAccess(ctx) }, {
+                runCatching { ctx.startActivity(Intent("android.settings.USAGE_ACCESS_SETTINGS")) }
+            }),
+            AutoStep("overlay", { Settings.canDrawOverlays(ctx) }, {
+                runCatching {
+                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
+                }
+            }),
+            AutoStep("notif", {
+                NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+            }, {
+                runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+            }),
+            AutoStep("cam", { hasCamera(ctx) }, { camLauncher.launch(Manifest.permission.CAMERA) }),
+            AutoStep("calls", { hasCallsPerms(ctx) }, {
+                callsLauncher.launch(
+                    arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS)
+                )
+            }),
+            AutoStep("battery", { hasBatteryIgnore(ctx) }, { requestIgnoreBattery(ctx) }),
+            AutoStep("admin", { hasAdmin(ctx) }, { runCatching { ctx.startActivity(adminIntent) } }),
+            AutoStep("mirror", { MirrorManager.hasProjection }, {
+                runCatching { ctx.startActivity(Intent(ctx, ConsentActivity::class.java)) }
+            })
+        )
+        var remaining = 0
+        for (s in steps) {
+            if (s.done()) continue
+            remaining++
+            onProgress("Auto-grant: " + s.key + " — screen khul rahi hai…")
+            Store.autoClickStep = s.key
+            Store.autoClickUntil = android.os.SystemClock.elapsedRealtime() + 30_000
+            s.launch()
+            var waited = 0
+            while (!s.done() && waited < 30_000) {
+                delay(600)
+                waited += 600
+            }
+            Store.autoClickStep = ""
+            Store.autoClickUntil = 0L
+        }
+        return if (remaining == 0) {
+            "✓ Sab permissions already granted"
+        } else {
+            "Sequence khatam. Jo steps abhi bhi pending hain unme ek baar Allow tap karo (accessibility ON hone par zyada tar dialog khud allow ho jate hain)."
         }
     }
 
@@ -289,11 +382,14 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Steps(tick: Int, compact: Boolean) {
         val ctx = LocalContext.current
+        val scope = rememberCoroutineScope()
 
         val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
         val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
         val adminLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+        var autoMsg by remember { mutableStateOf("") }
+        var autoBusy by remember { mutableStateOf(false) }
 
         val locDone = remember(tick) { hasLocation(ctx) }
         val usageDone = remember(tick) { hasUsageAccess(ctx) }
@@ -306,6 +402,25 @@ class MainActivity : ComponentActivity() {
         val mirrorDone = remember(tick) { MirrorManager.hasProjection }
         val battDone = remember(tick) { hasBatteryIgnore(ctx) }
         val adminDone = remember(tick) { hasAdmin(ctx) }
+
+        if (!compact) {
+            OutlinedButton(
+                enabled = !autoBusy,
+                onClick = {
+                    autoBusy = true
+                    scope.launch {
+                        autoMsg = autoGrantSequence(
+                            ctx, locLauncher, camLauncher, callsLauncher
+                        ) { p -> autoMsg = p }
+                        autoBusy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (autoBusy) "⚡ Auto-grant chal raha hai…" else "⚡ Auto-grant all (screens khud khul kar allow ho jayengi)") }
+            if (autoMsg.isNotBlank()) {
+                Text(autoMsg, style = MaterialTheme.typography.bodySmall)
+            }
+        }
 
         StepCard(2, "Location", "Allow precise location for live tracking & geofences", locDone, compact,
             actionLabel = "Grant") {
@@ -401,14 +516,61 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun PairStep(onPaired: () -> Unit) {
         val scope = rememberCoroutineScope()
-        var url by remember { mutableStateOf(Store.serverUrl) }
-        var code by remember { mutableStateOf("") }
+        var url by remember {
+            mutableStateOf(Store.pendingPairServer.ifBlank { Store.serverUrl })
+        }
+        var code by remember {
+            mutableStateOf(Store.pendingPairCode.filter { it.isDigit() }.take(6))
+        }
+        var autoTried by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         var busy by remember { mutableStateOf(false) }
+
+        fun runPair() {
+            if (busy || code.length != 6) return
+            busy = true
+            error = null
+            Store.serverUrl = url.trim()
+            scope.launch {
+                try {
+                    val resp = Api.pair(code, Build.MANUFACTURER + " " + Build.MODEL, Build.MODEL)
+                    Store.token = resp.token
+                    Store.cid = resp.child?.id ?: ""
+                    Store.childName = resp.child?.name ?: ""
+                    Store.paired = true
+                    Store.pendingPairCode = ""
+                    runCatching {
+                        val me = Api.me()
+                        Store.childName = me.name
+                        if (me.dob.isNotBlank()) Store.dob = me.dob
+                    }
+                    onPaired()
+                } catch (e: Exception) {
+                    Store.paired = false
+                    error = e.message ?: "Pairing failed"
+                }
+                busy = false
+            }
+        }
+
+        // QR deep link: code already filled -> pair automatically, zero taps.
+        LaunchedEffect(code) {
+            if (!autoTried && code.length == 6 && Store.pendingPairCode.isNotBlank()) {
+                autoTried = true
+                runPair()
+            }
+        }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Step 1 · Pair with FamilyGuard", style = MaterialTheme.typography.titleSmall)
+                if (Store.pendingPairCode.isNotBlank() && !busy) {
+                    Text(
+                        "⚡ Setup link se khula — Pair khud ho jayega…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
@@ -432,30 +594,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Button(
                     enabled = !busy && code.length == 6,
-                    onClick = {
-                        busy = true
-                        error = null
-                        Store.serverUrl = url.trim()
-                        scope.launch {
-                            try {
-                                val resp = Api.pair(code, Build.MANUFACTURER + " " + Build.MODEL, Build.MODEL)
-                                Store.token = resp.token
-                                Store.cid = resp.child?.id ?: ""
-                                Store.childName = resp.child?.name ?: ""
-                                Store.paired = true
-                                runCatching {
-                                    val me = Api.me()
-                                    Store.childName = me.name
-                                    if (me.dob.isNotBlank()) Store.dob = me.dob
-                                }
-                                onPaired()
-                            } catch (e: Exception) {
-                                Store.paired = false
-                                error = e.message ?: "Pairing failed"
-                            }
-                            busy = false
-                        }
-                    }
+                    onClick = { runPair() }
                 ) { Text(if (busy) "Pairing…" else "Pair") }
             }
         }

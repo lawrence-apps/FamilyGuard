@@ -409,6 +409,44 @@ app.get('/apk/child', (req, res) => {
   fs.createReadStream(APK_FILE).pipe(res);
 });
 
+// Public: QR setup link — scanning it opens the child app with server + code
+// prefilled and pairs automatically (falls back to APK download + manual code).
+app.get('/s/:code', (req, res) => {
+  const code = String(req.params.code || '').trim();
+  const c = db.children.find(x => x.pairingCode === code);
+  if (!c) return res.status(404).send('<h2>FamilyGuard</h2><p>Invalid setup link — parent dashboard se naya QR/link lo.</p>');
+  const host = String(req.get('host') || '');
+  if (!/^[a-zA-Z0-9.\-:\[\]]+$/.test(host)) return res.status(400).send('bad host');
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https');
+  const origin = `${proto}://${host}`;
+  const apk = apkMeta();
+  const dl = apk ? `${origin}/apk/child?t=${apk.shareToken}` : '';
+  const deep = `familyguard://pair?server=${encodeURIComponent(origin)}&code=${c.pairingCode}`;
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FamilyGuard — Child Setup</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
+.c{max-width:430px;text-align:center;background:#111a2e;padding:28px;border-radius:16px}
+.btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 30px;border-radius:10px;font-size:16px;font-weight:600;margin:8px 4px}
+.btn.green{background:#16a34a}
+.mut{color:#94a3b8;font-size:13px;line-height:1.6}h1{font-size:20px;margin:6px 0}
+.code{font-size:34px;letter-spacing:6px;font-weight:800;color:#93C5FD;margin:8px 0}</style></head>
+<body><div class="c"><div style="font-size:44px">🛡️</div><h1>FamilyGuard — Child Setup</h1>
+<p class="mut">App khul rahi hai… agar na khule to niche dekho.</p>
+<div id="fb" style="display:none">
+  ${dl ? `<a class="btn" href="${dl}">1) App download karo</a>` : ''}
+  <a class="btn green" href="${deep}">2) App kholo &amp; auto-setup</a>
+  <p class="mut">Ya <b>Device Health</b> app kholo aur ye code daalo:</p>
+  <div class="code">${c.pairingCode}</div>
+  <p class="mut">Server: ${origin}</p>
+</div>
+<script>
+  var link = ${JSON.stringify(deep)};
+  setTimeout(function(){ if (!document.hidden) document.getElementById('fb').style.display = 'block'; }, 1600);
+  window.location = link;
+</script>
+</div></body></html>`);
+});
+
 // ---------------------------------------------------------------- start
 const PORT = Number(process.env.PORT) || 8080;
 const server = http.createServer(app);

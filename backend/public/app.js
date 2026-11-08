@@ -187,7 +187,21 @@ function renderPairCard() {
   const c = activeChild();
   const show = !c || !c.paired;
   $("pair-card").classList.toggle("hidden", !show);
-  if (show) $("pair-code").textContent = c ? c.pairingCode : "Create a child first";
+  const qrEl = $("pair-qr");
+  if (!show || !c) { qrEl.classList.add("hidden"); if (show) $("pair-code").textContent = "Create a child first"; return; }
+  $("pair-code").textContent = c.pairingCode;
+  // QR setup link: scanning it opens the child app with server+code prefilled and pairs automatically.
+  try {
+    const link = S.origin + "/s/" + c.pairingCode;
+    const q = qrcode(0, "M");
+    q.addData(link);
+    q.make();
+    qrEl.classList.remove("hidden");
+    qrEl.innerHTML =
+      '<p class="muted small" style="margin:2px 0">⚡ <b>Child phone se ye QR scan karo</b> — app khud khul kar server + code daal kar pair ho jayegi</p>' +
+      q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) +
+      '<p class="muted small" style="word-break:break-all">' + esc(link) + "</p>";
+  } catch (e) { qrEl.classList.add("hidden"); }
 }
 
 function renderAdultCard() {

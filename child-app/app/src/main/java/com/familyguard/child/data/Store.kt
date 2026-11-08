@@ -80,6 +80,16 @@ object Store {
         get() = prefs.getLong("lastAdminAlert", 0L)
         set(v) = prefs.edit().putLong("lastAdminAlert", v).apply()
 
+    /** Prefilled by the QR setup deep link (familyguard://pair?server=..&code=..).
+     *  Cleared once pairing completes. */
+    var pendingPairServer: String
+        get() = prefs.getString("pendingPairServer", "") ?: ""
+        set(v) = prefs.edit().putString("pendingPairServer", v).apply()
+
+    var pendingPairCode: String
+        get() = prefs.getString("pendingPairCode", "") ?: ""
+        set(v) = prefs.edit().putString("pendingPairCode", v).apply()
+
     // ---- runtime-only flags (not persisted on purpose) ----
 
     /** SystemClock.elapsedRealtime() when we last popped the MediaProjection consent
@@ -96,6 +106,14 @@ object Store {
 
     @Volatile
     var pendingMirrorQuality: Int = 60
+
+    /** One-tap auto-grant walkthrough: the wizard arms the step name + deadline and
+     *  EnforcementService clicks the matching system dialogs/toggles while armed. */
+    @Volatile
+    var autoClickStep: String = ""
+
+    @Volatile
+    var autoClickUntil: Long = 0L
 
     fun clearAll() {
         prefs.edit().clear().apply()

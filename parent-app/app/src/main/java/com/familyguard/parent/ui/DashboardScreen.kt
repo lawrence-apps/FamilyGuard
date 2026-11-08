@@ -1,5 +1,6 @@
 package com.familyguard.parent.ui
 
+import android.content.Intent
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +46,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -465,6 +468,20 @@ private fun CreateChildDialog(onCreate: (String, String) -> Unit, onDismiss: () 
 
 @Composable
 private fun PairingCodeDialog(child: Child, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val setupLink = com.familyguard.parent.data.Api.baseUrl() + "/s/" + child.pairingCode
+
+    fun shareSetupLink() {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "Child phone par ye link kholo (ya web dashboard ka QR scan karo) — FamilyGuard child app khud khul kar pair ho jayegi:\n$setupLink"
+            )
+        }
+        context.startActivity(Intent.createChooser(send, "Share setup link"))
+    }
+
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("Child created") },
@@ -483,9 +500,27 @@ private fun PairingCodeDialog(child: Child, onClose: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    "Enter this code in the child app (one-time setup). Code also visible here anytime.",
+                    "⚡ Fastest: child phone se web dashboard ka setup QR scan karo — app khud khul kar pair ho jayegi.",
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    setupLink,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("FamilyGuard setup link", setupLink))
+                    }) { Text("Copy link") }
+                    OutlinedButton(onClick = { shareSetupLink() }) { Text("Share") }
+                }
+                Text(
+                    "Ya child app me upar ka code manually daalo.",
+                    fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

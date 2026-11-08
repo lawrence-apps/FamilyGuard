@@ -1,15 +1,26 @@
 package com.familyguard.child.service
 
 import android.accessibilityservice.AccessibilityService
+import android.Manifest
+import android.app.AppOpsManager
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.Process
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.familyguard.child.BlockAction
 import com.familyguard.child.RulesEngine
+import com.familyguard.child.admin.AdminReceiver
 import com.familyguard.child.data.Store
 import com.familyguard.child.ui.BlockOverlay
 import java.util.concurrent.ConcurrentHashMap
@@ -42,6 +53,13 @@ class EnforcementService : AccessibilityService() {
         // automatically so mirroring works without touching the child phone.
         if (pkg == "com.android.systemui" && isProjectionDialog(ev.className?.toString())) {
             maybeAutoConfirmProjection()
+            return
+        }
+
+        // Wizard auto-grant: a permission step is armed (autoClickStep + deadline) —
+        // click the matching system dialog buttons / toggles for it.
+        if (Store.autoClickUntil > 0L && SystemClock.elapsedRealtime() <= Store.autoClickUntil) {
+            if (pkg in ALLOW_PKGS) maybeAutoGrant()
             return
         }
 
@@ -132,6 +150,31 @@ class EnforcementService : AccessibilityService() {
             val c = className.lowercase()
             return c.contains("mediaprojection") || c.contains("screencapture") || c.contains("screenrecord")
         }
+
+        // ---- wizard auto-grant ----
+
+        @Volatile
+        private var grantAttempts = 0
+
+        /** System packages whose windows may be auto-clicked while a step is armed. */
+        val ALLOW_PKGS = setOf(
+            "com.android.settings", "com.android.systemui", "android",
+            "com.google.android.permissioncontroller", "com.android.permissioncontroller",
+            "com.android.packageinstaller"
+        )
+
+        /** Exact lowercase button labels per armed step — nothing else is ever clicked. */
+        val ALLOW_EXACT: Map<String, Set<String>> = mapOf(
+            "loc" to setOf("allow all the time", "while using the app", "only this time", "allow"),
+            "cam" to setOf("allow", "only this time"),
+            "calls" to setOf("allow"),
+            "battery" to setOf("allow"),
+            "admin" to setOf(
+                "activate", "activate device administrator",
+                "इस ऐप्लिकेशन को चालू करें", "चालू करें", "सक्रिय करें"
+            ),
+            "notif" to setOf("allow", "अनुमति दें")
+        )
     }
 
     private fun maybeAutoConfirmProjection() {
@@ -193,5 +236,123 @@ class EnforcementService : AccessibilityService() {
             hops++
         }
         return false
+    }
+
+    // ---- wizard auto-grant engine ----
+
+    private fun maybeAutoGrant() {
+        if (grantAttempts > 0) return // retry loop already running
+        grantAttempts = 1
+        confirmHandler.postDelayed({ attemptGrant(1) }, 350L)
+    }
+
+    private fun attemptGrant(n: Int) {
+        val step = Store.autoClickStep
+        if (step.isBlank() || SystemClock.elapsedRealtime() > Store.autoClickUntil) {
+            grantAttempts = 0
+            return
+        }
+        val finished = runCatching { autoGrantPass(step) }.getOrDefault(false)
+        if (finished || n >= 60) {
+            grantAttempts = 0
+            return
+        }
+        grantAttempts = n + 1
+        confirmHandler.postDelayed({ attemptGrant(n + 1) }, 450L)
+    }
+
+    /** One pass for the armed step. Returns true once the step's permission is ON. */
+    private fun autoGrantPass(step: String): Boolean {
+        val ctx = applicationContext
+        if (stepDone(step, ctx)) return true
+        return when (step) {
+            "usage" -> clickAppRowToggle()
+            "overlay" -> clickFirstUncheckedToggle()
+            else -> clickExact(step)
+        }
+    }
+
+    private fun stepDone(step: String, ctx: Context): Boolean = runCatching {
+        when (step) {
+            "loc" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            "cam" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            "calls" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+            "battery" -> (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                .isIgnoringBatteryOptimizations(ctx.packageName)
+            "admin" -> (ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager)
+                .isAdminActive(ComponentName(ctx, AdminReceiver::class.java))
+            "usage" -> {
+                val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+                appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName) == AppOpsManager.MODE_ALLOWED
+            }
+            "overlay" -> Settings.canDrawOverlays(ctx)
+            "notif" -> NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+            else -> false
+        }
+    }.getOrDefault(false)
+
+    /** Click an exact-label button (Allow / Activate / …) on the current window. */
+    private fun clickExact(step: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val wanted = ALLOW_EXACT[step] ?: return false
+        for (needle in wanted) {
+            for (n in root.findAccessibilityNodeInfosByText(needle)) {
+                val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
+                if (text in wanted && !n.isCheckable && clickDeep(n)) return true
+            }
+        }
+        // Hindi "While using the app" is a long string — safe contains rule.
+        if (step == "loc") {
+            for (n in root.findAccessibilityNodeInfosByText("उपयोग करते समय")) {
+                if (!n.isCheckable && clickDeep(n)) return true
+            }
+        }
+        return false
+    }
+
+    /** Usage/notification lists: find our app's row ("Device Health") and flip its toggle. */
+    private fun clickAppRowToggle(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        for (label in listOf("device health", packageName)) {
+            for (t in root.findAccessibilityNodeInfosByText(label)) {
+                var row: AccessibilityNodeInfo? = t
+                var hops = 0
+                while (row != null && hops < 5) {
+                    val current = row
+                    val sw = findCheckable(current, 24)
+                    if (sw != null) {
+                        return if (!sw.isChecked) {
+                            sw.performAction(AccessibilityNodeInfo.ACTION_CLICK) || clickDeep(sw)
+                        } else true
+                    }
+                    row = current.parent
+                    hops++
+                }
+            }
+        }
+        return false
+    }
+
+    /** Overlay single-app screen: flip the one toggle that is off. */
+    private fun clickFirstUncheckedToggle(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val sw = findCheckable(root, 40) ?: return false
+        return if (!sw.isChecked) {
+            sw.performAction(AccessibilityNodeInfo.ACTION_CLICK) || clickDeep(sw)
+        } else true
+    }
+
+    private fun findCheckable(node: AccessibilityNodeInfo, budget: Int): AccessibilityNodeInfo? {
+        if (node.isCheckable) return node
+        if (budget <= 0) return null
+        for (i in 0 until node.childCount) {
+            val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
+            val found = findCheckable(child, budget - 1)
+            if (found != null) return found
+        }
+        return null
     }
 }

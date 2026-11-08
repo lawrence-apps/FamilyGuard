@@ -96,6 +96,15 @@ GitHub baar-baar kholne ki zarurat nahi:
 
 ## 3) One-time setup (5 minutes)
 
+**⚡ QR se instant setup (recommended)**
+
+1. Web dashboard par pair-card me jo **QR** hai, wo child phone ke camera se **scan** karo.
+2. Child app apne aap khulegi — server + pairing code apne bhar kar **pair apne aap ho jayega**.
+3. Permission wizard me **"⚡ Auto-grant all"** dabao — har permission screen khud khulti hai aur (accessibility enable hone ke baad) dialog buttons khud allow ho jate hain. Android ki wajah se sirf accessibility enable karna ek baar manual hai.
+4. **Finish & Hide App** — bas.
+
+**Manual tarike se**
+
 **Parent phone — FamilyGuard Parent**
 1. Open app → server URL is pre-filled → **Register** (username + password, stored on your server).
 2. **Create child** → enter name + **date of birth** (DOB powers the 18+ auto-release).
