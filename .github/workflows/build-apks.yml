@@ -2,6 +2,7 @@ name: Build APKs
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -56,3 +57,32 @@ jobs:
         with:
           name: familyguard-child-debug-apk
           path: child-app/app/build/outputs/apk/debug/app-debug.apk
+
+  # Publish both APKs to a rolling GitHub release (tag "latest") so the backend
+  # can auto-sync the child APK from it — no manual upload in the dashboard.
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: [parent-apk, child-apk]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built APKs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish to rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          cp dist/familyguard-child-debug-apk/app-debug.apk  out/familyguard-child-debug.apk
+          cp dist/familyguard-parent-debug-apk/app-debug.apk out/familyguard-parent-debug.apk
+          cd out
+          gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create latest -R "$GITHUB_REPOSITORY" \
+                 --title "Latest builds (auto)" \
+                 --notes "Auto-built from commit ${GITHUB_SHA::7} — backend inhe khud sync karta hai."
+          gh release upload latest -R "$GITHUB_REPOSITORY" --clobber \
+            familyguard-child-debug.apk familyguard-parent-debug.apk

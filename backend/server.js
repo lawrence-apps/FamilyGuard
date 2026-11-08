@@ -323,12 +323,18 @@ app.get('/media/:name', (req, res) => {
 });
 
 // ---------------------------------------------------------------- child app apk share link
-// Parent uploads the child APK once (from the dashboard); the backend serves it at a
-// stable public link with a share token, so the child phone can download + install it.
+// The child APK normally comes straight from GitHub: CI publishes every main-branch
+// build to a rolling release (tag "latest") and the backend syncs it automatically.
+// Manual upload from the dashboard still works as a fallback.
 const APK_DIR = path.join(store.DATA_DIR, 'apk');
 const APK_FILE = path.join(APK_DIR, 'child.apk');
 const APK_META = path.join(APK_DIR, 'meta.json');
 fs.mkdirSync(APK_DIR, { recursive: true });
+
+const GH_REPO = String(process.env.GITHUB_REPO || 'lawrence-apps/FamilyGuard');
+const GH_TOKEN = String(process.env.GITHUB_TOKEN || '');
+const GH_CHILD_ASSET = String(process.env.GITHUB_CHILD_ASSET || 'familyguard-child-debug.apk');
+const GH_SYNC_MS = Number(process.env.GITHUB_SYNC_MINUTES || 10) * 60 * 1000;
 
 function apkMeta() {
   try { return JSON.parse(fs.readFileSync(APK_META, 'utf8')); } catch (e) { return null; }
@@ -341,14 +347,89 @@ function apkStatus() {
     url: m ? `/apk/child?t=${m.shareToken}` : '',
     fileName: m ? m.originalName : '',
     size: m ? m.size : 0,
-    uploadedAt: m ? m.uploadedAt : 0
+    uploadedAt: m ? m.uploadedAt : 0,
+    source: m ? (m.source || 'manual') : '',
+    releaseTag: m ? (m.releaseTag || '') : '',
+    lastSync: m ? (m.lastSync || 0) : 0,
+    githubConfigured: !!GH_REPO
   };
+}
+
+// Pull the latest CI-built child APK from the GitHub release. Keeps the existing
+// share token so old install links/QRs keep working across syncs.
+async function syncApkFromGithub({ manual = false } = {}) {
+  const base = { manual, repo: GH_REPO, asset: GH_CHILD_ASSET };
+  if (!GH_REPO) return { ok: false, ...base, reason: 'GITHUB_REPO not set' };
+  try {
+    const headers = {
+      'User-Agent': 'familyguard-backend',
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    };
+    if (GH_TOKEN) headers.Authorization = `Bearer ${GH_TOKEN}`;
+    const rel = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers });
+    if (!rel.ok) return { ok: false, ...base, reason: `release lookup failed (${rel.status}${rel.status === 404 ? ' — abhi koi release nahi bani' : ''})` };
+    const data = await rel.json();
+    const asset = (data.assets || []).find(a => a.name === GH_CHILD_ASSET);
+    if (!asset) return { ok: false, ...base, reason: `asset "${GH_CHILD_ASSET}" release me nahi mila` };
+
+    const cur = apkMeta();
+    // Manual upload is a deliberate override — background sync must not replace it.
+    if (!manual && cur && cur.source === 'manual') {
+      return { ok: true, skipped: true, ...base, reason: 'manual upload override hai — auto-sync ne nahi chhua' };
+    }
+    const fresh = cur && cur.source === 'github' && cur.assetId === asset.id &&
+      cur.assetUpdatedAt === asset.updated_at && cur.size === asset.size && fs.existsSync(APK_FILE);
+    if (fresh && !manual) return { ok: true, skipped: true, ...base, tag: data.tag_name, size: asset.size };
+
+    const dl = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/assets/${asset.id}`, {
+      headers: { ...headers, Accept: 'application/octet-stream' }
+    });
+    if (!dl.ok) return { ok: false, ...base, reason: `download failed (${dl.status}${dl.status === 403 ? ' — GITHUB_TOKEN set karo private repo ke liye' : ''})` };
+    const buf = Buffer.from(await dl.arrayBuffer());
+    if (buf.length < 1000 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
+      return { ok: false, ...base, reason: 'downloaded file APK jaisi nahi lag rahi' };
+    }
+    const tmp = APK_FILE + '.tmp';
+    fs.writeFileSync(tmp, buf);
+    fs.renameSync(tmp, APK_FILE);
+    const meta = {
+      shareToken: (cur && cur.shareToken) || crypto.randomBytes(8).toString('hex'),
+      originalName: asset.name,
+      size: buf.length,
+      uploadedAt: (cur && cur.uploadedAt) || Date.now(),
+      source: 'github',
+      releaseTag: data.tag_name,
+      assetId: asset.id,
+      assetUpdatedAt: asset.updated_at,
+      lastSync: Date.now()
+    };
+    fs.writeFileSync(APK_META, JSON.stringify(meta));
+    console.log(`[apk] synced from GitHub: ${data.tag_name} (${(buf.length / 1048576).toFixed(1)} MB)`);
+    return { ok: true, ...base, tag: data.tag_name, size: buf.length };
+  } catch (e) {
+    return { ok: false, ...base, reason: e.message };
+  }
+}
+
+let ghSyncTimer = null;
+function startGithubSync() {
+  if (ghSyncTimer) return;
+  ghSyncTimer = setInterval(() => syncApkFromGithub().catch(() => {}), GH_SYNC_MS);
+  // first sync shortly after boot so the link is live almost immediately
+  setTimeout(() => syncApkFromGithub().catch(() => {}), 4000);
 }
 
 const apkUpload = multer({ dest: APK_DIR, limits: { fileSize: 150 * 1024 * 1024 } });
 
 app.get('/api/apk', auth, parentOnly, (req, res) => {
   res.json(apkStatus());
+});
+
+// Manual re-sync from GitHub (dashboard "Sync now" button).
+app.post('/api/apk/sync', auth, parentOnly, async (req, res) => {
+  const result = await syncApkFromGithub({ manual: true });
+  res.status(result.ok ? 200 : 502).json({ ...apkStatus(), sync: result });
 });
 
 app.post('/api/apk', auth, parentOnly, apkUpload.single('file'), (req, res) => {
@@ -381,7 +462,7 @@ app.delete('/api/apk', auth, parentOnly, (req, res) => {
 app.get('/apk/child', (req, res) => {
   const m = apkMeta();
   if (!m || !fs.existsSync(APK_FILE)) {
-    return res.status(404).send('<h2>FamilyGuard</h2><p>No child app uploaded yet. Parent dashboard se APK upload karo.</p>');
+    return res.status(404).send('<h2>FamilyGuard</h2><p>Child app abhi available nahi hui. Thodi der baad try karo — GitHub build ke baad ye link apne aap live ho jayega.</p>');
   }
   if (String(req.query.t || '') !== m.shareToken) {
     return res.status(403).send('<h2>FamilyGuard</h2><p>Invalid or expired link — parent dashboard se fresh link lo.</p>');
@@ -454,6 +535,7 @@ wsHub.attach(server);
 
 server.listen(PORT, () => {
   console.log(`[familyguard] backend listening on :${PORT}  (${db.children.length} children, ${db.parents.length} parents)`);
+  startGithubSync(); // auto-pull child APK from GitHub releases
 });
 
 process.on('uncaughtException', (e) => console.error('[uncaught]', e));

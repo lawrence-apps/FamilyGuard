@@ -58,8 +58,9 @@ node server.js          # listens on :8080 (PORT env)
 
 Login/pairing **har redeploy ke baad banaye rakhne** ke liye ye 2 cheezein zaroori hain:
 
-1. **Persistent volume mount karo: `/app/data`** — isi folder me `db.json` (accounts, children, pairing) aur `jwt.secret` (login tokens) rehte hain. Volume na ho to har redeploy par sab data udd jayega aur aapko dobara register + re-pair karna padega. (Coolify → app → Storage → "Add volume": mount `/app/data`.)
+1. **Persistent volume mount karo: `/app/data`** — isi folder me `db.json` (accounts, children, pairing), `jwt.secret` (login tokens) aur synced child APK rehte hain. Volume na ho to har redeploy par sab data udd jayega aur aapko dobara register + re-pair karna padega. (Coolify → app → Storage → "Add volume": mount `/app/data`.)
 2. **(Optional, best) `JWT_SECRET` env set karo** — koi bhi lamba random string. Ye pin ho jayega to token validity data file par depend nahi karegi.
+3. **(Child APK auto-sync ke liye) `GITHUB_TOKEN` env set karo** — apna GitHub PAT (repo read access kaafi hai). Repo private hai, isliye release se APK download karne ke liye chahiye. `GITHUB_REPO` (default `lawrence-apps/FamilyGuard`) bhi override kar sakte ho.
 
 Coolify panel me:
 - **Build Pack**: `Nixpacks` (default, ab kaam karega — root `package.json` se detect hota hai) **ya** `Dockerfile` (root `Dockerfile` bhi repo me hai, fallback ke liye).
@@ -73,8 +74,12 @@ Deploy ke baad verify: `https://<your-domain>/health` → `{"ok":true,...}`.
 
 ## 2) Get the APKs
 
-**Option A — GitHub Actions (no Android Studio needed)**
-Push happens automatically on every commit: repo → **Actions → Build APKs → artifacts**
+**Option A — GitHub Actions (no Android Studio needed, automatic)**
+Har push par CI dono APKs build karke **Releases → `latest`** me publish kar deta hai:
+- `familyguard-child-debug.apk` — backend ise **apne aap download karta hai** (startup + har 10 min), to dashboard ka install link hamesha latest build par chalta hai. Kuch upload nahi karna padta.
+- `familyguard-parent-debug.apk` — Releases page se install karo.
+
+Manual bhi: repo → **Actions → Build APKs → artifacts**
 - `familyguard-parent-debug-apk`
 - `familyguard-child-debug-apk`
 
@@ -89,10 +94,12 @@ gradle assembleDebug -p child-app
 
 **Child app ka permanent install link (parent dashboard se)**
 
-GitHub baar-baar kholne ki zarurat nahi:
-1. Parent dashboard (web ya app) → **📱 Child app — install link** → child APK ek baar **upload** karo.
-2. Backend link bana deta hai (`https://<server>/apk/child?t=…`) — **Copy / Share / QR**. 
-3. Child phone par link kholo → download → install → pairing code daalo. APK `/app/data` volume me rehta hai, redeploy ke baad bhi link chalta hai. Har naye APK par token rotate hota hai.
+GitHub baar-baar kholne ki zarurat nahi — dashboard ka install link **apne aap** GitHub ke latest build se update hota rehta hai:
+1. CI push ke baad release me APK publish karta hai → backend startup par + har 10 min me sync kar leta hai (`GITHUB_TOKEN` env zaroori, private repo hai).
+2. Parent dashboard → **📱 Child app — install link** → link/QR ready milega (`https://<server>/apk/child?t=…`) — **Copy / Share / QR**. Sync ka status yahin dikhta hai; **🔄 Sync now** se turant force kar sakte ho.
+3. Child phone par link kholo → download → install → pairing code daalo. APK `/app/data` volume me rehta hai, redeploy ke baad bhi link chalta hai. Sync me share token same rehta hai — purane link/QR bhi chalte rehte hain.
+
+Fallback: dashboard se **APK manually upload** kar sakte ho (custom build ho to). Manual upload auto-sync ko override karta hai — GitHub build wapas chahiye to **Sync now** dabao.
 
 ## 3) One-time setup (5 minutes)
 

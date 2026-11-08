@@ -269,11 +269,20 @@ async function loadApk() {
 function renderApk(st) {
   S.apk = st;
   const has = !!(st && st.uploaded);
+  const isGh = has && st.source === "github";
   $("apk-upload").classList.toggle("hidden", has);
-  ["apk-replace", "apk-copy", "apk-share", "apk-delete"].forEach((id) => $(id).classList.toggle("hidden", !has));
+  ["apk-replace", "apk-copy", "apk-share"].forEach((id) => $(id).classList.toggle("hidden", !has));
+  $("apk-sync").classList.remove("hidden");
+  // GitHub-synced APK is auto-managed — Remove sirf manually-uploaded APK ke liye
+  $("apk-delete").classList.toggle("hidden", !has || isGh);
   if (has) {
     const url = S.origin + st.url;
-    $("apk-hint").textContent = "Link child phone par kholo (share ya QR scan) — APK download hoke install ho jayega. Har upload par naya token banta hai.";
+    const mb = st.size ? " · " + (st.size / 1048576).toFixed(1) + " MB" : "";
+    if (isGh) {
+      $("apk-hint").textContent = "✅ GitHub se auto-sync: " + (st.releaseTag || "latest") + mb + ". Har naye build ke baad APK khud update ho jati hai — link/QR same rehta hai, kuch karne ki zarurat nahi.";
+    } else {
+      $("apk-hint").textContent = "📦 Manually uploaded" + mb + ". Auto-sync isko replace nahi karega — GitHub build wapas chahiye to \"Sync now\" dabao.";
+    }
     $("apk-link").classList.remove("hidden");
     $("apk-link").textContent = url;
     try {
@@ -284,11 +293,26 @@ function renderApk(st) {
       $("apk-qr").innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
     } catch (e) { $("apk-qr").classList.add("hidden"); }
   } else {
-    $("apk-hint").textContent = "Child APK (GitHub Actions → familyguard-child-debug-apk) ek baar upload karo — fir yahin se link/QR share karke child phone par install karo. Dobara GitHub kholne ki zarurat nahi.";
+    $("apk-hint").textContent = "APK GitHub se apne aap aayegi — CI build ke baad khud sync ho jati hai (har 10 min check). \"Sync now\" se turant try karo, ya fallback me manually upload karo.";
     $("apk-link").classList.add("hidden");
     $("apk-qr").classList.add("hidden");
   }
 }
+
+$("apk-sync").onclick = async () => {
+  $("apk-sync").disabled = true;
+  $("apk-hint").textContent = "🔄 GitHub se sync kar rahe hain…";
+  try {
+    const st = await api("/api/apk/sync", "POST");
+    renderApk(st);
+    if (st.sync && st.sync.ok) toast("GitHub se sync ho gaya ✓" + (st.releaseTag ? " (" + st.releaseTag + ")" : ""));
+    else $("apk-hint").textContent = "⚠ Sync nahi hua: " + ((st.sync && st.sync.reason) || "unknown") + " — CI build complete hua? Server par GITHUB_TOKEN set hai?";
+  } catch (e) {
+    $("apk-hint").textContent = "Sync failed: " + e.message;
+  } finally {
+    $("apk-sync").disabled = false;
+  }
+};
 
 $("apk-upload").onclick = () => $("apk-file").click();
 $("apk-replace").onclick = () => $("apk-file").click();
@@ -328,7 +352,7 @@ $("apk-share").onclick = async () => {
   }
 };
 $("apk-delete").onclick = () => {
-  dialog("Remove uploaded APK?", "<p>Install link band ho jayega. Child phone par pehle se installed app par koi asar nahi hoga.</p>", async () => {
+  dialog("Remove uploaded APK?", "<p>Install link band ho jayega. Child phone par pehle se installed app par koi asar nahi hoga. Next auto-sync par GitHub build wapas aa sakta hai.</p>", async () => {
     await api("/api/apk", "DELETE");
     renderApk({ uploaded: false });
   });
