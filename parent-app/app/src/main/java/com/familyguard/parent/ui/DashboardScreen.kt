@@ -3,6 +3,7 @@ package com.familyguard.parent.ui
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.outlined.PhotoCameraFront
 import androidx.compose.material.icons.outlined.Screenshot
 import androidx.compose.material.icons.outlined.ScreenShare
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -118,7 +120,7 @@ fun DashboardScreen(vm: MainViewModel, nav: NavHostController) {
                 st = statusMap[child.id],
                 onRegenerate = { vm.regenerate(child.id) { } }
             )
-            if (ageYears(child) >= 18) {
+            if (child.ageYears() >= 18) {
                 ReleaseBanner(onRelease = { showRelease = true })
             }
             QuickActions(

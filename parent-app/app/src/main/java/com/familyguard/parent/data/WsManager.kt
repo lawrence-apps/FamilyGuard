@@ -31,7 +31,7 @@ sealed class WsEvent {
     data class Location(val cid: String, val point: LocPoint) : WsEvent()
     data class Notif(val cid: String, val notif: NotifItem) : WsEvent()
     data class Event(val cid: String, val event: EventItem) : WsEvent()
-    data class CommandResult(val cid: String, val result: CommandResult) : WsEvent()
+    data class CmdResult(val cid: String, val result: CommandResult) : WsEvent()
     data class Apps(val cid: String, val apps: List<ChildApp>) : WsEvent()
     data class Pairing(val cid: String) : WsEvent()
     class MirrorFrame(val bytes: ByteArray) : WsEvent()
@@ -150,7 +150,7 @@ class WsManager {
                 events.tryEmit(WsEvent.Event(cid, item))
             }
             "command_result" -> events.tryEmit(
-                WsEvent.CommandResult(
+                WsEvent.CmdResult(
                     cid,
                     CommandResult(
                         id = obj.str("id"),

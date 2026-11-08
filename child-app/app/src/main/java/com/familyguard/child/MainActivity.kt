@@ -19,6 +19,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,12 +28,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -367,11 +370,19 @@ class MainActivity : ComponentActivity() {
     ) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (done) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                    contentDescription = null,
-                    tint = if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                )
+                if (done) {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    )
+                }
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     val prefix = if (compact) "" else "Step $step · "
@@ -427,7 +438,7 @@ class MainActivity : ComponentActivity() {
                         Store.serverUrl = url.trim()
                         scope.launch {
                             try {
-                                val resp = Api.pair(code, Build.MANUFACTURER + " " + Build.MODEL)
+                                val resp = Api.pair(code, Build.MANUFACTURER + " " + Build.MODEL, Build.MODEL)
                                 Store.token = resp.token
                                 Store.cid = resp.child?.id ?: ""
                                 Store.childName = resp.child?.name ?: ""

@@ -77,7 +77,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             is WsEvent.Event -> events.value = (listOf(ev.event) + events.value).take(300)
             is WsEvent.Notif -> notifs.value = (listOf(ev.notif) + notifs.value).take(300)
-            is WsEvent.CommandResult -> onCommandResult(ev.result)
+            is WsEvent.CmdResult -> onCommandResult(ev.result)
             is WsEvent.Apps -> apps.value = ev.apps
             is WsEvent.Pairing -> refreshChildren()
             is WsEvent.MirrorFrame -> mirrorFrame.value = ev.bytes
