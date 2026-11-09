@@ -251,7 +251,7 @@ function renderStatus() {
   const labels = {
     service: "Background service", accessibility: "Accessibility", admin: "Device admin",
     location: "Location", usageAccess: "Usage access", overlay: "Overlay",
-    camera: "Camera", notifListener: "Notifications"
+    camera: "Camera", notifListener: "Notifications", batteryOk: "Battery exemption"
   };
   const broken = h ? Object.keys(labels).filter((k) => h[k] === false).map((k) => labels[k]) : [];
   const el = $("s-health");
@@ -279,7 +279,7 @@ function renderUninstallBanner() {
   if (!c || !c.paired || c.online) { card.classList.add("hidden"); return; }
   const idle = Date.now() - (c.lastSeen || 0);
   if (idle < 30 * 60 * 1000) { card.classList.add("hidden"); return; }
-  $("offline-text").innerHTML = "⚠️ <b>" + esc(c.name) + "</b> ka app <b>" + timeAgoHi(c.lastSeen) + "</b> se server se connect nahi hua. Agar child phone se app uninstall kar di gayi hai (ya phone band/offline hai) to ye normal hai. App wapas chahiye to child phone par dobara install karke same pairing code daalo — nahi chahiye to neeche se device remove kar do.";
+  $("offline-text").innerHTML = "⚠️ <b>" + esc(c.name) + "</b> ka app <b>" + timeAgoHi(c.lastSeen) + "</b> se server se connect nahi hua. Agar child phone se app uninstall kar di gayi hai (ya phone band/offline hai) to ye normal hai. <b>Recent apps se clear kiya tha?</b> Child phone ke dialer me <b>*#*#2724#*#*</b> dial karke app ek baar khol do — 1 min me wapas online aa jayega. App wapas chahiye to child phone par dobara install karke same pairing code daalo — nahi chahiye to neeche se device remove kar do.";
   card.classList.remove("hidden");
 }
 

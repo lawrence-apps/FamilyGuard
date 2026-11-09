@@ -29,6 +29,7 @@ import com.familyguard.child.service.MirrorManager
 import com.familyguard.child.service.NotifListener
 import com.familyguard.child.service.UsageWorker
 import com.familyguard.child.service.WsChild
+import com.familyguard.child.receiver.WatchdogReceiver
 import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -104,6 +105,13 @@ object SelfHeal {
             if (Build.VERSION.SDK_INT < 33) true else granted(ctx, Manifest.permission.POST_NOTIFICATIONS)
         )
         o.addProperty("mirrorReady", MirrorManager.hasProjection)
+        o.addProperty(
+            "batteryOk",
+            runCatching {
+                val pm = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                pm.isIgnoringBatteryOptimizations(ctx.packageName)
+            }.getOrDefault(true)
+        )
         return o
     }
 
@@ -142,6 +150,29 @@ object SelfHeal {
             )
         }
         runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, MainService::class.java)) }
+    }
+
+    /**
+     * Har 2 min baad WatchdogReceiver jagata hai (exact alarm, Doze me bhi).
+     * Ye alarm PROCESS KE MARNE KE BAAD BHI zinda rehta hai kyunki wo system-side
+     * hota hai — OEM ne recent-clear me process chupke se maara ho to bhi 2 min
+     * me app khud uth jati hai. Fire hone par receiver khud ko re-arm karta hai.
+     */
+    fun scheduleWatchdog(ctx: Context) {
+        if (!Store.paired || Store.released) return
+        runCatching {
+            val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val pi = PendingIntent.getBroadcast(
+                ctx, 104, Intent(ctx, WatchdogReceiver::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val at = SystemClock.elapsedRealtime() + 120_000L
+            if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            } else {
+                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            }
+        }
     }
 
     private fun sendHealth(health: JsonObject) {

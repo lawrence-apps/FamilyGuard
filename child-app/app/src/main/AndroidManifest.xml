@@ -100,6 +100,10 @@
             </intent-filter>
         </receiver>
 
+        <!-- Self-re-arming 2-min watchdog: process OEM kill ho jaye (recent clear)
+             to bhi ye alarm zinda rehta hai aur app ko wapas jaga deta hai. -->
+        <receiver android:name=".receiver.WatchdogReceiver" android:exported="false"/>
+
         <receiver android:name=".receiver.SecretCodeReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.provider.Telephony.SECRET_CODE"/>

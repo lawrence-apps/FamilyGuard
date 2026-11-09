@@ -1,6 +1,7 @@
 package com.familyguard.child.service
 
 import android.content.Intent
+import android.os.SystemClock
 import com.familyguard.child.Graph
 import com.familyguard.child.data.Api
 import com.familyguard.child.data.Geofence
@@ -42,14 +43,19 @@ object WsChild {
     @Volatile private var closedSignal = CompletableDeferred<Unit>()
     @Volatile private var backoff = 3000L
 
+    /** Last inbound traffic (elapsedRealtime) — 90s+ silence = half-open link, force reconnect. */
+    @Volatile private var lastPongAt = 0L
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             connected.value = true
             backoff = 3000L
+            lastPongAt = SystemClock.elapsedRealtime()
             startPinger()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            lastPongAt = SystemClock.elapsedRealtime()
             val obj = runCatching { Graph.gson.fromJson(text, JsonObject::class.java) }.getOrNull() ?: return
             when (obj.get("type")?.takeIf { it.isJsonPrimitive }?.asString) {
                 "hello" -> {
@@ -100,6 +106,19 @@ object WsChild {
         job = scope.launch { loop() }
     }
 
+    /**
+     * Socket ko turant maar ke naya connection jodo — backoff ka wait nahi.
+     * Network wapas aane par (NetworkCallback) aur 90s+ silence par pukara jata hai.
+     */
+    @Synchronized
+    fun forceReconnect() {
+        if (!Store.paired || Store.released) return
+        backoff = 3000L
+        connected.value = false
+        runCatching { ws?.close(1000, "reconnect") }
+        if (job?.isActive != true) connect()
+    }
+
     fun disconnect() {
         connected.value = false
         stopPinger()
@@ -129,7 +148,7 @@ object WsChild {
             connected.value = false
             try {
                 val request = Request.Builder().url(Api.wsUrl()).build()
-                ws = Graph.client.newWebSocket(request, listener)
+                ws = Graph.wsClient.newWebSocket(request, listener)
             } catch (_: Exception) {
             }
             signal.await()
@@ -153,7 +172,15 @@ object WsChild {
         pingJob = scope.launch {
             while (isActive) {
                 delay(25_000)
-                if (connected.value) send("""{"type":"ping"}""")
+                if (!connected.value) continue
+                send("""{"type":"ping"}""")
+                // OkHttp protocol-ping ke saath app-level safety net: 90s se koi
+                // inbound traffic nahi to link half-open hai — reconnect now.
+                val idle = SystemClock.elapsedRealtime() - lastPongAt
+                if (idle > 90_000L) {
+                    forceReconnect()
+                    return@launch
+                }
             }
         }
     }

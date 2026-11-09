@@ -235,6 +235,12 @@ function attach(server) {
         }
         let msg;
         try { msg = JSON.parse(data.toString()); } catch (e) { return; }
+        // Child ka app-level liveness ping — pong wapas bhejo warna half-open
+        // link par child ka pinger 90s+ silence detect nahi kar pata.
+        if (msg.type === 'ping') {
+          try { ws.send(JSON.stringify({ type: 'pong', t: Date.now() })); } catch (e) {}
+          return;
+        }
         try { handleChildMessage(cid, msg, msg); } catch (e) { console.error('[ws] child msg error:', e.message); }
       });
 
