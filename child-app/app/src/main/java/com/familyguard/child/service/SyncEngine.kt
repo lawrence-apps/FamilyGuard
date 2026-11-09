@@ -40,7 +40,9 @@ object SyncEngine {
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) ==
             PackageManager.PERMISSION_GRANTED
 
-    fun run(ctx: Context): Result {
+    // Api.postUsage/postCalls/postSms suspend hain, isliye poora chain suspend —
+    // callers (UsageWorker.doWork, CommandHandler.handle) dono suspend contexts hain.
+    suspend fun run(ctx: Context): Result {
         val apps = syncUsage(ctx)
         val calls = syncCalls(ctx)
         val sms = syncSms(ctx)
@@ -57,7 +59,7 @@ object SyncEngine {
     }
 
     /** @return kitne apps ka screen-time post hua */
-    fun syncUsage(ctx: Context): Int {
+    suspend fun syncUsage(ctx: Context): Int {
         if (!hasUsageAccess(ctx)) return 0
         return runCatching {
             val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
@@ -97,7 +99,7 @@ object SyncEngine {
     // -------------------------------------------------------------- calls
 
     /** @return kitni nayi call entries post hui */
-    fun syncCalls(ctx: Context): Int {
+    suspend fun syncCalls(ctx: Context): Int {
         if (!hasCallsPerm(ctx)) return 0
         return runCatching {
             val arr = JsonArray()
@@ -149,7 +151,7 @@ object SyncEngine {
     // ---------------------------------------------------------------- sms
 
     /** @return kitne naye SMS post hue */
-    fun syncSms(ctx: Context): Int {
+    suspend fun syncSms(ctx: Context): Int {
         if (!hasSmsPerm(ctx)) return 0
         return runCatching {
             val arr = JsonArray()
