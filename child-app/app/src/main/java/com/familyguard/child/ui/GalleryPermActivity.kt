@@ -4,7 +4,7 @@ import android.Manifest
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
-import androidx.activity.result.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts
 import com.familyguard.child.data.Store
 
 /**
