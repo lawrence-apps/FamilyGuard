@@ -256,6 +256,7 @@ function activeChild() { return S.children.find((c) => c.id === S.cid) || null; 
 function renderStatus() {
   const c = activeChild();
   renderHeader();
+  renderVersionBanner();
   if (!c) {
     $("s-batt").textContent = "🔋 —";
     $("s-app").textContent = "📱 —";
@@ -288,6 +289,24 @@ function renderStatus() {
   renderAdultCard();
   updateRing();
 }
+
+// PURANA-APP BANNER — har tab ke top par. Gallery/Mirror/Phone-check sab naye
+// child build (vc7/v1.6) me hain; purana app unhe jaanta hi nahi ("unknown
+// action"). Banner ke ek tap me update command chali jati hai — bachche ke
+// phone par silent install ho jata hai (UpdateManager, screen ON zaroori).
+function renderVersionBanner() {
+  const c = activeChild();
+  const el = $("oldver-banner");
+  if (!el) return;
+  const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
+  if (!c || !c.paired || vc === null || vc >= 7) { el.classList.add("hidden"); return; }
+  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest 7 = v1.6) — isliye <b>Gallery, Mirror aur Phone-check nahi chal rahe</b>: ye sab naye build me hi hain. Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min).";
+  el.classList.remove("hidden");
+}
+$("oldver-update").onclick = () => {
+  S.updateApkSentAt = Date.now();
+  sendCmd("update_apk");
+};
 
 // Manually-uninstall / phone-off detection: paired child jo 30+ min se server
 // se nahi mila. App uninstall ho gayi ho to record yahin se remove kar sakte ho.
@@ -432,6 +451,7 @@ $("apk-force-update").onclick = () => {
   if (c && !c.online) {
     toast("Bachcha offline hai — command queue me hai, connect hote hi update ho jayegi");
   }
+  S.updateApkSentAt = Date.now();
   sendCmd("update_apk");
 };
 
@@ -625,14 +645,41 @@ function handleWs(m) {
       } else if (m.ok && d.status === "mirror_diag") {
         // 🔍 Phone check — bachche ke phone ka poora mirror snapshot aa gaya
         renderMirrorDiag(d);
-      } else if (!m.ok && d.error === "unknown action" && S.mirrorDiagSentAt && Date.now() - S.mirrorDiagSentAt < 15000) {
-        // PURANA child build — mirror_diag command usme hai hi nahi
-        S.mirrorDiagSentAt = 0;
-        renderMirrorDiag({ old: true });
+      } else if (m.ok && typeof d.status === "string" && d.status && S.updateApkSentAt && Date.now() - S.updateApkSentAt < 90000) {
+        // 📲 update_apk ka HONEST result — pehle sirf generic "Ho gaya ✓" dikhta
+        // tha, isliye parent ko pata hi nahi chalta ki update ruk kyun gaya.
+        S.updateApkSentAt = 0;
+        const upd = {
+          "busy": "Update pehle se chal raha hai — 2 min ruk kar app khud naye version par aa jayegi",
+          "not paired": "Bachche ka phone paired nahi hai",
+          "install permission auto-grant chal raha hai — update agli cycle me": "📲 Install permission khud ON ho rahi hai (bachche ki screen par 1–2 sec ki flash aayegi) — 2 min me dobara “📲 Update abhi bhejo” dabao",
+          "no apk on server": "Server par APK nahi hai — Set tab → “🔄 Sync now” dabao (GitHub build sync hota hai)",
+          "up-to-date": "✅ Bachche ka app already latest hai. Agar phir bhi Gallery/Mirror na chale to Live tab → 🔍 Phone check report dekho",
+          "screen off — postponed": "📵 Bachche ka phone screen OFF hai — isliye update ruk gaya. Screen ON karo, ~1 min me khud install ho jayega",
+          "installing": "✅ APK download ho gayi, install ho rahi hai — bachche ki screen ON rakho. ~2 min me app khud naye version (v1.6) par chali jayegi, phir Gallery/Mirror chalega"
+        };
+        toast(upd[d.status] || "Update status: " + d.status);
       } else if (m.ok && d.url) {
         $("media-card").classList.remove("hidden");
         $("media-img").src = S.origin + d.url;
         toast("Capture mil gaya ✓ (Live tab dekho)");
+      } else if (!m.ok && d.error === "unknown action") {
+        // PURANA child build — ye command usme exist hi nahi karti (Gallery
+        // vc6+ me, Phone check vc7+ me aayi). Ab raw "unknown action" toast ki
+        // jagah saaf batao kya karna hai.
+        if (S.gallery.loading) {
+          S.gallery.loading = false;
+          galleryStatus("Bachche ke phone par PURANA app hai — Gallery naye build (v1.6) me hai. Upar laal banner me 📲 “Update abhi bhejo” dabao.", true);
+        }
+        if (S.mirrorDiagSentAt && Date.now() - S.mirrorDiagSentAt < 15000) {
+          S.mirrorDiagSentAt = 0;
+          renderMirrorDiag({ old: true });
+        }
+        dialog(
+          "Bachche ka app PURANA hai",
+          "<p>Ye feature bachche ke phone ke <b>naye build (v1.6)</b> me hai — purana app isse jaanta hi nahi (isliye “unknown action”).</p><p><b>Fix:</b> 📲 Update bhejo — bachche ke phone par khud install ho jayega. <b>Bachche ki screen ON honi chahiye</b>, 2–3 min me ho jayega.</p>",
+          () => { S.updateApkSentAt = Date.now(); sendCmd("update_apk"); }
+        );
       } else if (m.ok && d.lat != null && d.lng != null) {
         toast("Ho gaya ✓ (" + Number(d.lat).toFixed(5) + ", " + Number(d.lng).toFixed(5) + ")");
       } else if (m.ok) {
