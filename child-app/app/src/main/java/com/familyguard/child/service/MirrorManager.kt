@@ -85,7 +85,24 @@ object MirrorManager {
         stopStreaming()
         streamJob = scope.launch {
             val interval = 1000L / fps.coerceIn(1, 15)
+            // Safety net: while streaming, if the WS stays down (parent app closed
+            // without pressing Stop, network drop, …) for 30 s, end the projection
+            // session entirely — otherwise the cast icon stayed stuck on the child's
+            // status bar long after nobody was watching.
+            var wsDownSince = 0L
             while (isActive) {
+                if (!WsChild.connected.value) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (wsDownSince == 0L) {
+                        wsDownSince = now
+                    } else if (now - wsDownSince > 30_000L) {
+                        stopStreaming()
+                        release()
+                        return@launch
+                    }
+                } else {
+                    wsDownSince = 0L
+                }
                 val snap = synchronized(this@MirrorManager) { latestFrame }
                 if (snap == null) {
                     delay(100)

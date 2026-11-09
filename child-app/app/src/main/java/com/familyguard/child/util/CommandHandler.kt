@@ -146,6 +146,12 @@ object CommandHandler {
                 // begin streaming after the parent already pressed Stop.
                 Store.pendingMirrorFps = -1
                 sendMirrorState(false)
+                // FULL release, not just the frame loop: leaving the projection
+                // session alive kept the cast icon stuck on the child's status bar
+                // even after the parent pressed Stop. Ending the session removes
+                // the icon immediately; the next Start re-consents automatically
+                // (accessibility auto-click), so nothing manual is needed.
+                MirrorManager.release()
                 Pair(true, data)
             }
 

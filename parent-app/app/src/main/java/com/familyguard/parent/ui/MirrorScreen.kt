@@ -15,6 +15,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,6 +43,13 @@ fun MirrorScreen(vm: MainViewModel) {
     val lastFrameAt by vm.mirrorLastFrameAt.collectAsState()
     var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var now by remember { mutableStateOf(0L) }
+
+    // Leaving this screen automatically stops mirroring AND ends the child's
+    // projection session — the cast icon on the child phone disappears the moment
+    // you navigate away (or close the app) instead of staying on forever.
+    DisposableEffect(Unit) {
+        onDispose { vm.stopMirror() }
+    }
 
     // 1 s ticker so the stale-frames hint reacts without a new frame arriving.
     LaunchedEffect(Unit) {
@@ -123,7 +131,7 @@ fun MirrorScreen(vm: MainViewModel) {
             )
         }
         Text(
-            "Start dabane par consent dialog khud confirm hota hai (5–10 sec). Cast icon dikh raha hai par screen nahi? Child ka screen OFF hoga — screen on karo, frames apne aap aa jayenge.",
+            "Cast sign sirf tab dikhta hai jab aap LIVE dekh rahe ho — Stop dabate hi ya screen se nikalte hi gayab. Consent popup Android ka rule hai (100% hat nahi sakta), lekin wo 1 second me khud confirm ho jata hai — child ko touch nahi karna padta.",
             color = Color(0xFF9CA3AF),
             fontSize = 11.sp,
             textAlign = TextAlign.Center,
