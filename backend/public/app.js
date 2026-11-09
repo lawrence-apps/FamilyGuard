@@ -293,7 +293,9 @@ function renderApk(st) {
       $("apk-qr").innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
     } catch (e) { $("apk-qr").classList.add("hidden"); }
   } else {
-    $("apk-hint").textContent = "APK GitHub se apne aap aayegi — CI build ke baad khud sync ho jati hai (har 10 min check). \"Sync now\" se turant try karo, ya fallback me manually upload karo.";
+    $("apk-hint").textContent = (st && st.githubTokenSet === false)
+      ? "APK GitHub se auto-sync hogi, par server par GITHUB_TOKEN set nahi hai — Coolify → Environment me GITHUB_TOKEN (GitHub PAT) add karke Redeploy karo. Tab tak \"Upload APK\" se manually de sakte ho."
+      : "APK GitHub se apne aap aayegi — CI build ke baad khud sync ho jati hai (har 10 min check). \"Sync now\" se turant try karo, ya fallback me manually upload karo.";
     $("apk-link").classList.add("hidden");
     $("apk-qr").classList.add("hidden");
   }
@@ -303,10 +305,19 @@ $("apk-sync").onclick = async () => {
   $("apk-sync").disabled = true;
   $("apk-hint").textContent = "🔄 GitHub se sync kar rahe hain…";
   try {
-    const st = await api("/api/apk/sync", "POST");
+    // raw fetch (api() 502 par throw karta hai aur sync.reason kho deta hai)
+    const res = await fetch(S.origin + "/api/apk/sync", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + S.token }
+    });
+    const st = await res.json().catch(() => ({}));
     renderApk(st);
-    if (st.sync && st.sync.ok) toast("GitHub se sync ho gaya ✓" + (st.releaseTag ? " (" + st.releaseTag + ")" : ""));
-    else $("apk-hint").textContent = "⚠ Sync nahi hua: " + ((st.sync && st.sync.reason) || "unknown") + " — CI build complete hua? Server par GITHUB_TOKEN set hai?";
+    if (st.sync && st.sync.ok) {
+      toast("GitHub se sync ho gaya ✓" + (st.releaseTag ? " (" + st.releaseTag + ")" : ""));
+    } else {
+      const why = (st.sync && st.sync.reason) || "HTTP " + res.status;
+      $("apk-hint").textContent = "⚠ Sync nahi hua: " + why;
+    }
   } catch (e) {
     $("apk-hint").textContent = "Sync failed: " + e.message;
   } finally {

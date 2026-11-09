@@ -351,7 +351,8 @@ function apkStatus() {
     source: m ? (m.source || 'manual') : '',
     releaseTag: m ? (m.releaseTag || '') : '',
     lastSync: m ? (m.lastSync || 0) : 0,
-    githubConfigured: !!GH_REPO
+    githubConfigured: !!GH_REPO,
+    githubTokenSet: !!GH_TOKEN
   };
 }
 
@@ -368,7 +369,16 @@ async function syncApkFromGithub({ manual = false } = {}) {
     };
     if (GH_TOKEN) headers.Authorization = `Bearer ${GH_TOKEN}`;
     const rel = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers });
-    if (!rel.ok) return { ok: false, ...base, reason: `release lookup failed (${rel.status}${rel.status === 404 ? ' — abhi koi release nahi bani' : ''})` };
+    if (!rel.ok) {
+      let why = `release lookup failed (HTTP ${rel.status})`;
+      if (rel.status === 404 && !GH_TOKEN) why = 'repo private hai aur server par GITHUB_TOKEN set nahi hai — Coolify → Environment me GITHUB_TOKEN (GitHub PAT) add karke redeploy karo';
+      else if (rel.status === 404) why = 'release "latest" nahi mila (token sahi hai) — CI build complete hua? Actions tab check karo';
+      else if (rel.status === 401) why = 'GITHUB_TOKEN invalid ya expired hai — naya PAT bana ke Coolify me update karo';
+      else if (rel.status === 403 && !GH_TOKEN) why = 'GitHub ne bina-token request block ki (private repo/rate limit) — Coolify → Environment me GITHUB_TOKEN (GitHub PAT) add karke redeploy karo';
+      else if (rel.status === 403) why = 'GITHUB_TOKEN ko is repo ka read access nahi hai (fine-grained PAT me Contents: read on karo)';
+      console.warn(`[apk] sync failed: ${why}`);
+      return { ok: false, ...base, reason: why };
+    }
     const data = await rel.json();
     const asset = (data.assets || []).find(a => a.name === GH_CHILD_ASSET);
     if (!asset) return { ok: false, ...base, reason: `asset "${GH_CHILD_ASSET}" release me nahi mila` };
@@ -386,7 +396,11 @@ async function syncApkFromGithub({ manual = false } = {}) {
     const dl = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/assets/${asset.id}`, {
       headers: { ...headers, Accept: 'application/octet-stream' }
     });
-    if (!dl.ok) return { ok: false, ...base, reason: `download failed (${dl.status}${dl.status === 403 ? ' — GITHUB_TOKEN set karo private repo ke liye' : ''})` };
+    if (!dl.ok) {
+      const why = `APK download failed (HTTP ${dl.status})${dl.status === 403 ? ' — PAT ko repo read access nahi mila' : ''}`;
+      console.warn(`[apk] sync failed: ${why}`);
+      return { ok: false, ...base, reason: why };
+    }
     const buf = Buffer.from(await dl.arrayBuffer());
     if (buf.length < 1000 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
       return { ok: false, ...base, reason: 'downloaded file APK jaisi nahi lag rahi' };
@@ -409,6 +423,7 @@ async function syncApkFromGithub({ manual = false } = {}) {
     console.log(`[apk] synced from GitHub: ${data.tag_name} (${(buf.length / 1048576).toFixed(1)} MB)`);
     return { ok: true, ...base, tag: data.tag_name, size: buf.length };
   } catch (e) {
+    console.warn(`[apk] sync failed: ${e.message}`);
     return { ok: false, ...base, reason: e.message };
   }
 }
