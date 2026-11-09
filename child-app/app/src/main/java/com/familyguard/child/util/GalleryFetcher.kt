@@ -56,13 +56,13 @@ object GalleryFetcher {
 
     /** Latest `limit` media items (photos+videos), date DESC. No pixel data. */
     fun list(ctx: Context, limit: Int = 200): JsonArray {
-        val all = JsonArray()
+        val all = ArrayList<JsonObject>()
         if (hasImagesPerm(ctx)) all.addAll(query(ctx, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "photo"))
         if (hasVideosPerm(ctx)) all.addAll(query(ctx, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video"))
         // date DESC merge — dono queries ka result ek saath sort karo
-        val sorted = all.toList().sortedByDescending { it.asJsonObject.get("date")?.asLong ?: 0L }
+        all.sortByDescending { it.get("date")?.asLong ?: 0L }
         val out = JsonArray()
-        for (el in sorted.take(limit)) out.add(el)
+        for (el in all.take(limit)) out.add(el)
         return out
     }
 
@@ -121,8 +121,8 @@ object GalleryFetcher {
     private suspend fun mediaFile(ctx: Context, id: String, maxSide: Int, quality: Int, prefix: String): File? =
         withContext(Dispatchers.IO) {
             val uri = uriFor(id) ?: return@withContext null
-            val bmp = if (isVideo(id)) videoFrame(ctx, uri, maxSide) else decodeScaled(ctx, uri, maxSide)
-                ?: return@withContext null
+            val decoded = if (isVideo(id)) videoFrame(ctx, uri, maxSide) else decodeScaled(ctx, uri, maxSide)
+            val bmp = decoded ?: return@withContext null
             runCatching {
                 val bos = ByteArrayOutputStream()
                 bmp.compress(Bitmap.CompressFormat.JPEG, quality, bos)
