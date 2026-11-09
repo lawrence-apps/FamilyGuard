@@ -254,11 +254,9 @@ object CommandHandler {
         }
     }
 
-    companion object {
-        // Neutral brand — bachche ke phone par kahi bhi "FamilyGuard"/parental-control
-        // na dikhe. Notification text ab "Device Health" theme me hai.
-        const val CH_FG = "dh_service"
-    }
+    // Neutral brand — bachche ke phone par kahi bhi "FamilyGuard"/parental-control
+    // na dikhe. Notification text ab "Device Health" theme me hai.
+    const val CH_FG = "dh_service"
 
     private fun ensureChannel(ctx: Context) {
         runCatching {
