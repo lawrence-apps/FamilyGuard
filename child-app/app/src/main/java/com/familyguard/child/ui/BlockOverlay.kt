@@ -65,7 +65,7 @@ object BlockOverlay {
                 st.gravity = Gravity.CENTER
 
                 val ft = TextView(ctx)
-                ft.text = "Managed by FamilyGuard"
+                ft.text = "Managed remotely"
                 ft.textSize = 11f
                 ft.setTextColor(0xFF777777.toInt())
                 ft.gravity = Gravity.CENTER

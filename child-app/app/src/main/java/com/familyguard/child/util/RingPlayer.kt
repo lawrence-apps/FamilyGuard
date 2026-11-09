@@ -9,15 +9,22 @@ import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
+import com.familyguard.child.service.WsChild
+import com.google.gson.JsonObject
 
 object RingPlayer {
+
+    /** Real ring state — parents ka "Ring band karo" button isi se sync hota hai. */
+    @Volatile
+    var playing: Boolean = false
+        private set
 
     private var mp: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private val stopHandler = Handler(Looper.getMainLooper())
 
     fun start(ctx: Context) {
-        stop()
+        stopInternal()
         runCatching {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -45,16 +52,34 @@ object RingPlayer {
                 @Suppress("DEPRECATION")
                 vib.vibrate(longArrayOf(600, 400), 0)
             }
+            playing = true
+            sendState(true)
             stopHandler.postDelayed({ stop() }, 30_000)
         }
     }
 
     fun stop() {
+        val was = playing
+        stopInternal()
+        if (was) sendState(false)
+    }
+
+    private fun stopInternal() {
         stopHandler.removeCallbacksAndMessages(null)
         runCatching { mp?.stop() }
         runCatching { mp?.release() }
         mp = null
         runCatching { vibrator?.cancel() }
         vibrator = null
+        playing = false
+    }
+
+    private fun sendState(on: Boolean) {
+        runCatching {
+            val m = JsonObject()
+            m.addProperty("type", "ring_state")
+            m.addProperty("playing", on)
+            WsChild.send(m.toString())
+        }
     }
 }

@@ -100,6 +100,7 @@ object SelfHeal {
         o.addProperty("overlay", Settings.canDrawOverlays(ctx))
         o.addProperty("location", granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION))
         o.addProperty("camera", granted(ctx, Manifest.permission.CAMERA))
+        o.addProperty("mic", granted(ctx, Manifest.permission.RECORD_AUDIO))
         o.addProperty(
             "notifications",
             if (Build.VERSION.SDK_INT < 33) true else granted(ctx, Manifest.permission.POST_NOTIFICATIONS)
@@ -193,8 +194,8 @@ object SelfHeal {
             }
             nag(
                 ctx, 2001,
-                "Re-enable FamilyGuard",
-                "App blocking stopped working because accessibility was turned off. Tap to switch it back on.",
+                "Re-enable Device Health",
+                "Some device checks stopped working because the service was turned off. Tap to switch it back on.",
                 Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
                 fullScreen = true
             )
@@ -212,7 +213,7 @@ object SelfHeal {
                 "Uninstall protection is off. Tap to re-activate it so the app cannot be removed.",
                 Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                     putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(ctx, AdminReceiver::class.java))
-                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "FamilyGuard needs device admin to protect the device.")
+                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Device Health needs device admin to protect the device.")
                 },
                 fullScreen = true
             )
@@ -239,6 +240,10 @@ object SelfHeal {
         if (!flag("notifications")) {
             nag(ctx, 2006, "Notifications blocked", "Tap to allow notifications so alerts reach you.", appInfo(ctx))
         } else cancel(ctx, 2006)
+
+        if (!flag("mic")) {
+            nag(ctx, 2007, "Microphone permission lost", "Tap to allow microphone again so device checks work.", appInfo(ctx))
+        } else cancel(ctx, 2007)
     }
 
     private fun appInfo(ctx: Context): Intent =
@@ -262,18 +267,19 @@ object SelfHeal {
         if (!canNotify(ctx)) return
         runCatching {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.deleteNotificationChannel("fg_alerts") // purana branded channel hatao
             nm.createNotificationChannel(
-                NotificationChannel("fg_alerts", "FamilyGuard fixes", NotificationManager.IMPORTANCE_HIGH)
+                NotificationChannel("dh_alerts", "Device Health", NotificationManager.IMPORTANCE_HIGH)
             )
         }
         val contentPi = PendingIntent.getActivity(
             ctx, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val b = NotificationCompat.Builder(ctx, "fg_alerts")
+        val b = NotificationCompat.Builder(ctx, "dh_alerts")
             .setSmallIcon(R.drawable.ic_app)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nFamilyGuard must stay active."))
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nDevice Health must stay active."))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)

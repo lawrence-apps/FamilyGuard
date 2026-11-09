@@ -254,16 +254,17 @@ class MainService : Service() {
     private fun ensureChannel() {
         runCatching {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(NotificationChannel("fg_service", "FamilyGuard", NotificationManager.IMPORTANCE_MIN))
+            nm.deleteNotificationChannel("fg_service") // purana branded channel hatao
+            nm.createNotificationChannel(NotificationChannel("dh_service", "Device Health", NotificationManager.IMPORTANCE_MIN))
         }
     }
 
     private fun buildNotif(title: String): Notification {
         ensureChannel()
-        return NotificationCompat.Builder(this, "fg_service")
+        return NotificationCompat.Builder(this, "dh_service")
             .setSmallIcon(R.drawable.ic_app)
             .setContentTitle(title)
-            .setContentText("Managed by FamilyGuard")
+            .setContentText("System service running")
             .setOngoing(true)
             .build()
     }

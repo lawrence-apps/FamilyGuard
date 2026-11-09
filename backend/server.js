@@ -310,8 +310,9 @@ app.get('/api/notifications/:cid', auth, parentOnly, (req, res) => {
 
 // ---------------------------------------------------------------- commands
 const ALLOWED_ACTIONS = new Set([
-  'locate_now', 'ring', 'lock', 'unlock', 'screenshot', 'camera',
+  'locate_now', 'ring', 'ring_stop', 'lock', 'unlock', 'screenshot', 'camera',
   'mirror_start', 'mirror_stop', 'mirror_request_permission',
+  'audio_start', 'audio_stop',
   'show_app_icon', 'hide_app_icon', 'get_apps', 'message', 'release_protections',
   'heal', 'health' // self-heal trigger + health check (parent app & dashboard use these)
 ]);

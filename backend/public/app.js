@@ -19,6 +19,11 @@ const S = {
   lastFrameAt: 0,      // ms of last mirror frame received (status watchdog)
   lastBlobUrl: null,   // previous mirror frame blob URL (revoked on next frame)
   streaming: false,    // child-reported mirroring state (mirror_state)
+  ringOn: false,       // ring command chalu hai (button toggle + ring_state sync)
+  ringTimer: null,     // child 30s me khud band karta hai — UI safety reset
+  audioOn: false,      // live audio listening chalu hai
+  audioCtx: null,      // WebAudio context (audio chunks playback)
+  audioNextAt: 0,      // next chunk schedule time (gapless playback)
   map: null,
   marker: null,
   track: [],
@@ -251,7 +256,7 @@ function renderStatus() {
   const labels = {
     service: "Background service", accessibility: "Accessibility", admin: "Device admin",
     location: "Location", usageAccess: "Usage access", overlay: "Overlay",
-    camera: "Camera", notifListener: "Notifications", batteryOk: "Battery exemption"
+    camera: "Camera", notifListener: "Notifications", batteryOk: "Battery exemption", mic: "Microphone"
   };
   const broken = h ? Object.keys(labels).filter((k) => h[k] === false).map((k) => labels[k]) : [];
   const el = $("s-health");
@@ -512,12 +517,19 @@ function handleWs(m) {
         if (m.health) c.health = m.health;
       }
       // Mirroring ke beech child offline ho gaya to UI stuck na rahe
-      if (m.online === false && S.mirrorOn && m.cid === S.cid) {
-        S.mirrorOn = false; S.streaming = false;
-        $("mirror-start").classList.remove("hidden");
-        $("mirror-stop").classList.add("hidden");
-        $("mirror-fps").textContent = "";
-        mirrorStatus("Child offline ho gaya — mirroring band. Child wapas connect hote hi dobara Start karo.", true);
+      if (m.online === false && m.cid === S.cid) {
+        if (S.mirrorOn) {
+          S.mirrorOn = false; S.streaming = false;
+          $("mirror-start").classList.remove("hidden");
+          $("mirror-stop").classList.add("hidden");
+          $("mirror-fps").textContent = "";
+          mirrorStatus("Child offline ho gaya — mirroring band. Child wapas connect hote hi dobara Start karo.", true);
+        }
+        // Ring chalu tha to button reset karo (30s auto-stop bhi hai)
+        setRingBtn(false);
+        if (S.ringTimer) { clearTimeout(S.ringTimer); S.ringTimer = null; }
+        // Live audio bhi band kar do
+        if (S.audioOn) stopAudioUi();
       }
       renderStatus();
       break;
@@ -570,6 +582,30 @@ function handleWs(m) {
       }
       break;
     }
+    case "ring_state": {
+      // Child device ki real ring state — same button toggle isi se sync hota hai
+      if (m.cid === S.cid) {
+        setRingBtn(!!m.playing);
+        if (!m.playing && S.ringTimer) { clearTimeout(S.ringTimer); S.ringTimer = null; }
+      }
+      break;
+    }
+    case "audio": {
+      // Live audio chunk (base64 PCM 16kHz mono) — sirf tab jab humne Start dabaya
+      if (m.cid === S.cid && S.audioOn && m.data) onAudioChunk(m.data);
+      break;
+    }
+    case "audio_state": {
+      if (m.cid === S.cid) {
+        if (m.streaming) {
+          audioStatus("Bachche ka mic live hai 🎧", false);
+        } else if (S.audioOn) {
+          stopAudioUi();
+          toast("Mic band ho gaya (child side se)");
+        }
+      }
+      break;
+    }
     case "pairing": {
       S.synth.unshift({ t: Date.now(), ico: "✅", txt: "Bachche ka device pair ho gaya 🎉" });
       renderActivity();
@@ -602,10 +638,111 @@ async function sendCmd(action, params) {
   } catch (e) { alert(e.message); }
 }
 
+/* ---------------- ring toggle (same button = bajao + band) ---------------- */
+function setRingBtn(on) {
+  S.ringOn = on;
+  const b = $("qa-ring");
+  if (b) b.innerHTML = on ? "🔕 Ring band karo" : "🔔 Ring bajao";
+}
+function toggleRing() {
+  if (S.ringOn) {
+    sendCmd("ring_stop");
+    setRingBtn(false);
+    if (S.ringTimer) { clearTimeout(S.ringTimer); S.ringTimer = null; }
+  } else {
+    sendCmd("ring");
+    setRingBtn(true);
+    if (S.ringTimer) clearTimeout(S.ringTimer);
+    // child 30s me khud band karta hai — ring_state na aaye to bhi UI reset
+    S.ringTimer = setTimeout(() => setRingBtn(false), 40000);
+  }
+}
+
+/* ---------------- live audio (mic) ---------------- */
+function audioStatus(msg, warn) {
+  const el = $("audio-status");
+  if (!el) return;
+  if (!msg) { el.classList.add("hidden"); return; }
+  el.textContent = msg;
+  el.style.color = warn ? "#B45309" : "#166534";
+  el.style.background = warn ? "#FFFBEB" : "#F0FDF4";
+  el.style.borderColor = warn ? "#FCD34D" : "#86EFAC";
+  el.classList.remove("hidden");
+}
+
+// base64 PCM (16kHz mono int16) -> AudioBuffer (context ke sampleRate par resample)
+// -> destination par gapless schedule. Int16 LE -> Float32 manual conversion.
+function onAudioChunk(b64) {
+  try {
+    if (!S.audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try { S.audioCtx = new AC({ sampleRate: 16000 }); }
+      catch (e) { S.audioCtx = new AC(); } // purane browsers: default rate par resample
+    }
+    const ctx = S.audioCtx;
+    if (ctx.state === "suspended") { ctx.resume(); }
+    const bin = atob(b64);
+    const n16 = bin.length >> 1;
+    if (!n16) return;
+    const from = 16000, to = ctx.sampleRate;
+    const outN = Math.max(1, Math.round(n16 * to / from));
+    const buf = ctx.createBuffer(1, outN, to);
+    const ch = buf.getChannelData(0);
+    const step = outN > 1 ? (n16 - 1) / (outN - 1) : 0;
+    for (let i = 0; i < outN; i++) {
+      const p = i * step, i0 = Math.floor(p), i1 = Math.min(n16 - 1, i0 + 1), f = p - i0;
+      const v0 = (((bin.charCodeAt(i0 * 2 + 1) << 8) | bin.charCodeAt(i0 * 2)) << 16 >> 16) / 32768;
+      const v1 = (((bin.charCodeAt(i1 * 2 + 1) << 8) | bin.charCodeAt(i1 * 2)) << 16 >> 16) / 32768;
+      ch[i] = v0 + (v1 - v0) * f;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    const now = ctx.currentTime;
+    if (S.audioNextAt < now + 0.02) S.audioNextAt = now + 0.06;
+    if (S.audioNextAt - now > 0.8) S.audioNextAt = now + 0.06; // drift resync
+    src.start(S.audioNextAt);
+    S.audioNextAt += buf.duration;
+  } catch (e) {}
+}
+
+function stopAudioUi() {
+  S.audioOn = false;
+  if (S.audioCtx) { try { S.audioCtx.close(); } catch (e) {} S.audioCtx = null; }
+  S.audioNextAt = 0;
+  const st = $("audio-start"), sp = $("audio-stop"), vz = $("audio-viz");
+  if (st) st.classList.remove("hidden");
+  if (sp) sp.classList.add("hidden");
+  if (vz) vz.classList.add("hidden");
+  audioStatus("", false);
+}
+
+$("audio-start").onclick = () => {
+  if (!S.cid) return;
+  if (S.ws && S.ws.readyState === 1) {
+    // audio chunks bhi watch_mirror subscription se filter hote hain
+    S.ws.send(JSON.stringify({ type: "watch_mirror", cid: S.cid }));
+    sendCmd("audio_start");
+    S.audioOn = true;
+    $("audio-start").classList.add("hidden");
+    $("audio-stop").classList.remove("hidden");
+    $("audio-viz").classList.remove("hidden");
+    const c = activeChild();
+    audioStatus(c && !c.online ? "Bachcha abhi offline hai — connect hote hi mic khud chalu ho jayega." : "Mic connect ho raha hai…", true);
+  } else alert("Server se connect nahi hai");
+};
+$("audio-stop").onclick = () => {
+  sendCmd("audio_stop");
+  stopAudioUi();
+};
+
 $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
   b.onclick = () => {
     const c = b.dataset.cmd;
-    if (c === "lock") {
+    if (c === "ring") {
+      toggleRing();
+    } else if (c === "lock") {
       dialog("Phone lock karo", '<label>Bachche ki screen par message</label><input id="dl-msg" value="Time up! Phone band karo 😊">',
         () => sendCmd("lock", { message: dlgVal("dl-msg") }));
     } else if (c === "message") {

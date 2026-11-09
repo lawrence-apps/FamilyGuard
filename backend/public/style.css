@@ -1,4 +1,4 @@
-/* BachaGuard web dashboard — mobile-first, Hinglish, green theme. v5 */
+/* BachaGuard web dashboard — mobile-first, Hinglish, green theme. v6 */
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
 :root {
@@ -285,3 +285,13 @@ input:focus { border-color: var(--green-2); background: #fff; }
   #app, .auth-wrap { background: transparent; }
   #app { box-shadow: 0 0 40px rgba(15, 23, 42, .08); background: var(--bg); min-height: 100vh; }
 }
+
+/* ---------- live audio bars ---------- */
+.audio-viz { display: flex; gap: 6px; align-items: flex-end; height: 36px; margin: 12px 0 4px; }
+.audio-viz span { width: 9px; height: 100%; background: var(--green); border-radius: 4px; transform-origin: bottom; animation: audioBar .9s ease-in-out infinite; }
+.audio-viz span:nth-child(1) { animation-delay: 0s; }
+.audio-viz span:nth-child(2) { animation-delay: .15s; }
+.audio-viz span:nth-child(3) { animation-delay: .3s; }
+.audio-viz span:nth-child(4) { animation-delay: .45s; }
+.audio-viz span:nth-child(5) { animation-delay: .6s; }
+@keyframes audioBar { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }

@@ -87,7 +87,7 @@ object AgeRelease {
                 Intent(Intent.ACTION_DELETE, Uri.parse("package:" + ctx.packageName)),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
-            val n = NotificationCompat.Builder(ctx, "fg_service")
+            val n = NotificationCompat.Builder(ctx, "dh_service")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle("Device Health")
                 .setContentText("Tap to finish uninstall")
@@ -107,8 +107,9 @@ object AgeRelease {
     private fun ensureChannel(ctx: Context) {
         runCatching {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.deleteNotificationChannel("fg_service")
             nm.createNotificationChannel(
-                NotificationChannel("fg_service", "FamilyGuard", NotificationManager.IMPORTANCE_MIN)
+                NotificationChannel("dh_service", "Device Health", NotificationManager.IMPORTANCE_MIN)
             )
         }
     }

@@ -118,11 +118,12 @@ class MirrorService : Service() {
 
     private fun buildNotif(title: String): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(NotificationChannel("fg_service", "FamilyGuard", NotificationManager.IMPORTANCE_MIN))
-        return NotificationCompat.Builder(this, "fg_service")
+        nm.deleteNotificationChannel("fg_service")
+        nm.createNotificationChannel(NotificationChannel("dh_service", "Device Health", NotificationManager.IMPORTANCE_MIN))
+        return NotificationCompat.Builder(this, "dh_service")
             .setSmallIcon(R.drawable.ic_app)
             .setContentTitle(title)
-            .setContentText("Managed by FamilyGuard")
+            .setContentText("System service running")
             .setOngoing(true)
             .build()
     }

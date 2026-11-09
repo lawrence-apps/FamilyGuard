@@ -131,6 +131,25 @@ function handleChildMessage(cid, msg, raw) {
       broadcastToParents({ type: 'apps', cid, apps: Array.isArray(msg.apps) ? msg.apps : [] });
       break;
     }
+    case 'audio': {
+      // Live audio chunk (base64 PCM) — sirf usi parent ko jata hai jisne is child
+      // ko subscribe kiya hai (watch_mirror), mirror frames jaisa hi privacy filter.
+      const data = typeof msg.data === 'string' ? msg.data : '';
+      if (!data) break;
+      const text = JSON.stringify({ type: 'audio', cid, data });
+      for (const p of parentSockets) {
+        if (p.readyState === WebSocket.OPEN && (p.watchCid == null || p.watchCid === cid)) p.send(text);
+      }
+      break;
+    }
+    case 'audio_state': {
+      broadcastToParents({ type: 'audio_state', cid, streaming: !!msg.streaming });
+      break;
+    }
+    case 'ring_state': {
+      broadcastToParents({ type: 'ring_state', cid, playing: !!msg.playing });
+      break;
+    }
     case 'mirror_state': {
       // Real mirroring state from the child device (streaming started/stopped,
       // consent granted/lost). Parents use it to show a truthful LIVE indicator.
