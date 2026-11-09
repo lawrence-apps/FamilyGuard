@@ -132,6 +132,7 @@ async function refreshChildren() {
     renderStatus();
     renderPairCard();
     renderAdultCard();
+    renderChildrenList();
     if ($("tab-apps").classList.contains("hidden") === false) loadApps();
   } catch (e) {
     if (String(e.message).includes("401") || String(e.message).includes("bad token")) {
@@ -159,6 +160,8 @@ function renderStatus() {
   if (!c) {
     $("s-online").textContent = "—"; $("s-batt").textContent = "—";
     $("s-app").textContent = "—"; $("s-seen").textContent = "—";
+    $("danger-child-name").textContent = "Device: —";
+    renderUninstallBanner();
     return;
   }
   $("s-online").innerHTML = c.online
@@ -183,6 +186,21 @@ function renderStatus() {
   } else {
     el.classList.add("hidden");
   }
+  $("danger-child-name").textContent = "Device: " + c.name + (c.model ? " · " + c.model : (c.deviceName ? " · " + c.deviceName : ""));
+  renderUninstallBanner();
+}
+
+// Manually-uninstall / phone-off detection: paired child jo 30+ min se server
+// se nahi mila. App uninstall ho gayi ho to record yahin se remove kar sakte ho.
+function renderUninstallBanner() {
+  const c = activeChild();
+  const card = $("offline-card");
+  if (!card) return;
+  if (!c || !c.paired || c.online) { card.classList.add("hidden"); return; }
+  const idle = Date.now() - (c.lastSeen || 0);
+  if (idle < 30 * 60 * 1000) { card.classList.add("hidden"); return; }
+  $("offline-text").innerHTML = "⚠️ <b>" + esc(c.name) + "</b> ka app <b>" + timeAgo(c.lastSeen) + "</b> se server se connect nahi hua. Agar child phone se app uninstall kar di gayi hai (ya phone band/offline hai) to ye normal hai. App wapas chahiye to child phone par dobara install karke same pairing code daalo — nahi chahiye to neeche se device remove kar do.";
+  card.classList.remove("hidden");
 }
 
 function renderPairCard() {
@@ -249,18 +267,14 @@ $("regen-code").onclick = async () => {
 
 function renderChildrenList() {
   $("children-list").innerHTML = S.children.map((c) =>
-    '<li><div><b>' + esc(c.name) + '</b> <span class="meta">' + (c.paired ? esc(c.deviceName || "paired") : "code: " + esc(c.pairingCode)) +
-    '</span></div><button class="x" data-del="' + esc(c.id) + '">🗑</button></li>').join("") ||
+    '<li><div><b>' + esc(c.name) + "</b> " + (c.online
+      ? '<span class="dot on"></span> <span class="meta">online</span>'
+      : '<span class="dot off"></span> <span class="meta">offline · last seen ' + timeAgo(c.lastSeen) + "</span>") +
+    '<br><span class="meta">' + (c.paired ? esc(c.deviceName || "paired") : "code: " + esc(c.pairingCode)) + "</span></div>" +
+    '<button class="btn small danger" data-del="' + esc(c.id) + '" style="margin-top:0">Remove device</button></li>').join("") ||
     '<li class="muted">No children yet</li>';
   $("children-list").querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = () => dialog("Remove device?", "<p>Child phone se saari permissions (accessibility, admin, screen sharing) hat jayengi, app wahan uninstall dialog dikha kar band ho jayegi, aur ye device data samet dashboard se hamesha ke liye delete ho jayega. Ye undo nahi hota. Continue?</p>", async () => {
-      // 1) strip permissions + fire the uninstall dialog on the child (if online)
-      try { await api("/api/commands", "POST", { cid: b.dataset.del, action: "release_protections", params: {} }); } catch (e) {}
-      // 2) wipe the record — an offline child self-releases on next connect (orphan guard)
-      await api("/api/children/" + b.dataset.del, "DELETE");
-      if (S.cid === b.dataset.del) S.cid = null;
-      await refreshChildren();
-    });
+    b.onclick = () => removeDeviceFull(b.dataset.del);
   });
 }
 
@@ -458,6 +472,7 @@ function handleWs(m) {
       break;
     }
     case "pairing": { refreshChildren(); break; }
+    case "children_changed": { refreshChildren(); break; }
     default: break;
   }
 }
@@ -491,12 +506,34 @@ $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
 });
 
 function releaseProtections() {
-  dialog("Uninstall child app?",
-    "<p>Child ki age kuch bhi ho, ye kaam karega. Child device par accessibility + admin disable hoga, monitoring band hogi aur system uninstall dialog khud khulega — wahan se app uninstall ho jayegi. Ye action undo nahi hota (dobara setup karna padega). Continue?</p>",
+  dialog("Sirf uninstall — record rahega?",
+    "<p>Child device par accessibility + admin disable hoga, monitoring band hogi aur system uninstall dialog khud khulega — wahan se app uninstall ho jayegi. <b>Dashboard me device record rahega</b> — dobara same pairing code se pair kar sakte ho. Continue?</p>",
     () => sendCmd("release_protections"));
+}
+
+// FULL Remove device: child phone se saari permissions + uninstall dialog, aur
+// dashboard se record data samet hamesha ke liye delete. Offline phone agle
+// connect par orphan guard se khud ko clean kar lega.
+function removeDeviceFull(cid) {
+  const c = S.children.find((x) => x.id === cid);
+  if (!c) { alert("Create / select a child first"); return; }
+  dialog("Remove device — " + c.name + "?",
+    "<p><b>" + esc(c.name) + "</b> ke phone se saari permissions (accessibility, device admin, screen sharing) release hongi, monitoring band hogi aur system uninstall dialog khud khulega — app wahan se uninstall ho jayegi.</p><p>Dashboard se ye device <b>data samet hamesha ke liye delete</b> ho jayega. Agar phone us waqt offline hai to app agle connect par khud clean ho jayegi. <b>Ye undo nahi hota</b> — dobara monitoring ke liye naya pairing code lena hoga.</p>",
+    async () => {
+      // 1) child online hai to abhi permissions strip + uninstall dialog fire karo
+      try { await api("/api/commands", "POST", { cid, action: "release_protections", params: {} }); } catch (e) {}
+      // 2) record purge — orphan guard offline child ko next connect par release karega
+      await api("/api/children/" + cid, "DELETE");
+      if (S.cid === cid) S.cid = null;
+      await refreshChildren();
+      toast("Device removed ✓");
+    });
 }
 $("release-btn").onclick = releaseProtections;
 $("release-btn-2").onclick = releaseProtections;
+$("remove-device-btn").onclick = () => { S.cid ? removeDeviceFull(S.cid) : alert("Create / select a child first"); };
+$("remove-device-btn-2").onclick = () => { S.cid ? removeDeviceFull(S.cid) : alert("Create / select a child first"); };
+$("offline-remove").onclick = () => { if (S.cid) removeDeviceFull(S.cid); };
 
 /* ---------------- rules (screen time) ---------------- */
 async function loadRules() {

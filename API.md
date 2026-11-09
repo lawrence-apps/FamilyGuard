@@ -145,4 +145,5 @@ Actions:
 - `{type:"command_result", cid, id, ok, data}`
 - `{type:"apps", cid, apps:[{pkg,name}]}`
 - `{type:"pairing", cid, paired:true}`
+- `{type:"children_changed"}` — a child record was added or deleted (e.g. "Remove device"); dashboards re-fetch `GET /api/children`. `DELETE /api/children/:id` also sends `release_protections` to the child first (if online), closes its sockets and broadcasts this event.
 - **binary frames** = mirror JPEG frames from the child

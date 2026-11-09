@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="FamilyGuard">
 <title>FamilyGuard</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=3">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563EB' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -56,6 +56,12 @@
           <div><span class="lbl">Last seen</span><span id="s-seen">—</span></div>
         </div>
         <div id="s-health" class="hidden" style="margin-top:10px;padding:10px;border-radius:8px;background:#FEF2F2;color:#B91C1C;font-size:13px"></div>
+      </div>
+      <div class="card amber hidden" id="offline-card">
+        <p class="small" id="offline-text"></p>
+        <div class="row">
+          <button id="offline-remove" class="btn danger small" style="margin-top:0">🗑 Remove device</button>
+        </div>
       </div>
       <div class="card hidden" id="pair-card">
         <h3>Pair the child device</h3>
@@ -105,8 +111,12 @@
       </div>
       <div class="card red-outline" id="danger-card">
         <h3>Danger zone</h3>
-        <p class="muted small">Child app ko kisi bhi age me, kabhi bhi uninstall kar sakte hain — accessibility + admin release honge, monitoring band hogi aur child phone par system uninstall dialog khud khulega.</p>
-        <button id="release-btn" class="btn danger">🗑 Uninstall child app</button>
+        <p class="muted small" id="danger-child-name" style="font-weight:700;color:#B91C1C">Device: —</p>
+        <div class="row">
+          <button id="remove-device-btn" class="btn danger" style="margin-top:0">🗑 Remove device</button>
+          <button id="release-btn" class="btn small">Sirf uninstall (record rahega)</button>
+        </div>
+        <p class="muted small"><b>Remove device</b> = child phone se saari permissions (accessibility, device admin, screen sharing) hat kar app uninstall ho jayegi <b>aur ye device dashboard se data samet hamesha ke liye delete</b> ho jayega. <b>Sirf uninstall</b> = app phone se hat jayegi par record rahega (dobara pair kar sakte ho).</p>
       </div>
     </section>
 
@@ -210,10 +220,13 @@
         <ul id="children-list" class="chip-list"></ul>
         <button id="new-child-2" class="btn small">+ Add child</button>
       </div>
-      <div class="card">
+      <div class="card red-outline">
         <h3>Danger zone</h3>
-        <p class="muted small">Uninstall child app — kisi bhi age me kaam karta hai. Release disables accessibility + admin, stops monitoring and fires the system uninstall dialog on the child device (also automatic at age 18).</p>
-        <button id="release-btn-2" class="btn danger">🗑 Uninstall child app</button>
+        <p class="muted small"><b>Remove device</b> = saari permissions release + uninstall dialog + dashboard record delete (undo nahi hota). <b>Sirf uninstall</b> = app hat jayegi par record rahega. Dono kisi bhi age me kaam karte hain — 18 se pehle bhi, baad me bhi.</p>
+        <div class="row">
+          <button id="remove-device-btn-2" class="btn danger" style="margin-top:0">🗑 Remove device</button>
+          <button id="release-btn-2" class="btn small">Sirf uninstall (record rahega)</button>
+        </div>
       </div>
       <div class="card">
         <h3>About</h3>
@@ -248,6 +261,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

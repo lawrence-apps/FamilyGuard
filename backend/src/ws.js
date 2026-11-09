@@ -24,6 +24,16 @@ function sendToChild(cid, obj) {
   return ok;
 }
 
+// Device record delete hone par child ke sab sockets band kar do — app ka
+// WsChild turant reconnect karega aur orphan guard use release_protections
+// bhej dega (offline delete ka instant cleanup).
+function closeChild(cid) {
+  const s = childSockets.get(cid);
+  if (!s) return;
+  for (const ws of s) { try { ws.close(4002, 'removed'); } catch (e) {} }
+  childSockets.delete(cid);
+}
+
 function broadcastToParents(obj) {
   const text = JSON.stringify(obj);
   for (const ws of parentSockets) {
@@ -263,4 +273,4 @@ function attach(server) {
   wss.on('close', () => clearInterval(interval));
 }
 
-module.exports = { attach, isOnline, sendToChild, broadcastToParents, publicChild, defaultRules, storeLocation, storeNotification, storeEvent, handleChildMessage };
+module.exports = { attach, isOnline, sendToChild, closeChild, broadcastToParents, publicChild, defaultRules, storeLocation, storeNotification, storeEvent, handleChildMessage };

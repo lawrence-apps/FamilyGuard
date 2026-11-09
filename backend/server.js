@@ -40,7 +40,11 @@ app.get('/health', (req, res) => {
 });
 
 // Web dashboard (works on iPhone/Android/desktop browsers — no app needed)
-app.use('/app', express.static(path.join(__dirname, 'public')));
+// no-cache: deploy ke turant baad browser fresh app.js/index.html utha le
+// (purana cacheserve = "remove device ni dikha" wali complaints se bachav)
+app.use('/app', express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache')
+}));
 app.get('/', (req, res) => res.redirect('/app/'));
 
 // ---------------------------------------------------------------- parent auth
@@ -96,7 +100,21 @@ function purgeChild(cid) {
 }
 
 app.delete('/api/children/:id', auth, parentOnly, (req, res) => {
-  purgeChild(req.params.id);
+  const cid = req.params.id;
+  const c = db.children.find(x => x.id === cid);
+  if (c) {
+    // Child abhi online hai to pehle release command — permissions strip +
+    // uninstall dialog turant. (Web/parent app khud bhi bhejte hain, par yahan
+    // bhejna guarantee karta hai ki koi bhi client se delete par child saaf ho.)
+    wsHub.sendToChild(cid, { type: 'command', id: rid(), action: 'release_protections', params: {} });
+  }
+  purgeChild(cid);
+  // Sockets band — child app turant reconnect karega, orphan guard use
+  // release_protections bhej kar app ko khud clean karwa dega.
+  wsHub.closeChild(cid);
+  // Sab parent dashboards (web + parent app) turant refresh — removed device
+  // list me na dikhe.
+  wsHub.broadcastToParents({ type: 'children_changed' });
   res.json({ ok: true });
 });
 
