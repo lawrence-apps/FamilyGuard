@@ -60,6 +60,22 @@ object Api {
 
     suspend fun me(): MeResp = parseMeResp(obj(get("/api/child/me")))
 
+    // ------------------------------------------------------------------ apk
+
+    /** Server ke paas abhi konsa child APK hai (GitHub auto-sync wala). */
+    suspend fun getApkMeta(): JsonObject = obj(get("/api/child/apk"))
+
+    /** APK ko server se cache file me download karo (silent, koi notification nahi). */
+    suspend fun downloadApk(dest: File, urlPath: String): Boolean = withContext(Dispatchers.IO) {
+        val b = auth(Request.Builder().url(baseUrl() + urlPath).get())
+        client.newCall(b.build()).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("HTTP ${r.code}")
+            val body = r.body ?: throw IOException("empty body")
+            dest.outputStream().use { out -> body.byteStream().use { it.copyTo(out) } }
+        }
+        true
+    }
+
     // ----------------------------------------------------------------- rules
 
     suspend fun getRules(): Rules = parseRules(obj(get("/api/rules/${Store.cid}")))

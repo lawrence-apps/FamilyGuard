@@ -121,6 +121,9 @@ object SelfHeal {
     /** Runs on every watchdog cycle (UsageWorker every 15 min), on boot and on the remote "heal" command. */
     fun runNow(ctx: Context) {
         if (!Store.paired || Store.released) return
+        // 0. silent self-update check (30-min throttle andar hai) — naya GitHub
+        //    build aaya ho to child app khud update ho jati hai
+        runCatching { UpdateManager.requestCheck(ctx) }
         // 1. keep the periodic sync alive even if WorkManager dropped it
         runCatching { UsageWorker.schedule(ctx) }
         // 2. revive the foreground service if something killed it

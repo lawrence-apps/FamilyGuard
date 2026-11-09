@@ -167,7 +167,14 @@ class EnforcementService : AccessibilityService() {
         val ALLOW_PKGS = setOf(
             "com.android.settings", "com.android.systemui", "android",
             "com.google.android.permissioncontroller", "com.android.permissioncontroller",
-            "com.android.packageinstaller"
+            "com.android.packageinstaller",
+            // Installer/uninstaller dialogs (uninstall auto-confirm + silent update):
+            // AOSP dialog com.android.packageinstaller me aata hai, lekin OEMs apna
+            // installer host karte hain — bina inke uninstall/update dialog par
+            // click kabhi nahi hota.
+            "com.google.android.packageinstaller",
+            "com.miui.packageinstaller", "com.miui.securitycenter",
+            "com.samsung.android.packageinstaller"
         )
 
         /** Packages that may host the MediaProjection consent dialog. */
@@ -187,7 +194,20 @@ class EnforcementService : AccessibilityService() {
                 "activate", "activate device administrator",
                 "इस ऐप्लिकेशन को चालू करें", "चालू करें", "सक्रिय करें"
             ),
-            "notif" to setOf("allow", "अनुमति दें")
+            "notif" to setOf("allow", "अनुमति दें"),
+            // Self-uninstall confirm dialog (Remove device / 18+ release):
+            // AOSP: "Do you want to uninstall this app?" [OK], MIUI/Samsung apna
+            // text use karte hain. Sirf release/uninstall armed hone par hi armed
+            // window (120 s) me click hota hai.
+            "uninstall" to setOf(
+                "ok", "uninstall", "uninstall anyway", "uninstall for all users",
+                "इस ऐप को अनइंस्टॉल करें", "अनइंस्टॉल करें", "अनइंस्टॉल"
+            ),
+            // Silent self-update: child app naya APK install karta hai — system
+            // install confirm par khud "Install" click ho jata hai.
+            "install" to setOf(
+                "install", "install anyway", "इंस्टॉल करें", "इंस्टॉल करें।"
+            )
         )
     }
 
@@ -269,7 +289,10 @@ class EnforcementService : AccessibilityService() {
             return
         }
         val finished = runCatching { autoGrantPass(step) }.getOrDefault(false)
-        if (finished || n >= 60) {
+        // Uninstall/install dialogs slow phones par bohot der baad dikhte hain —
+        // armed window ~120 s hai, retry loop usse thoda aage tak chale.
+        val maxTries = if (step == "uninstall" || step == "install") 300 else 60
+        if (finished || n >= maxTries) {
             grantAttempts = 0
             return
         }
@@ -284,6 +307,8 @@ class EnforcementService : AccessibilityService() {
         return when (step) {
             "usage" -> clickAppRowToggle()
             "overlay" -> clickFirstUncheckedToggle()
+            // Install-unknown-apps screen: per-app toggle list — humari row flip karo
+            "unknown" -> clickAppRowToggle()
             else -> clickExact(step)
         }
     }
@@ -306,6 +331,9 @@ class EnforcementService : AccessibilityService() {
             }
             "overlay" -> Settings.canDrawOverlays(ctx)
             "notif" -> NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+            // Install-unknown-apps: silent APK update ke liye zaroori
+            "unknown" -> runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+            // install/uninstall steps kabhi "done" nahi hote — click hi success hai
             else -> false
         }
     }.getOrDefault(false)

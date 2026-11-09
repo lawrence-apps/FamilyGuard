@@ -242,6 +242,14 @@ object CommandHandler {
                 Pair(true, data)
             }
 
+            "update_apk" -> {
+                // Parent ne "Child app update" button dabaya — silent self-update
+                // abhi check karo (server par naya APK ho to khud install ho jayega).
+                val status = com.familyguard.child.util.UpdateManager.checkAndInstall(ctx)
+                data.addProperty("status", status)
+                Pair(true, data)
+            }
+
             "health" -> {
                 data.add("health", SelfHeal.healthReport(ctx))
                 Pair(true, data)

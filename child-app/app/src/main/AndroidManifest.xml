@@ -24,6 +24,9 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- Silent self-update: child app GitHub build aane par khud update ho jaye
+         (install confirm dialog accessibility se auto-click hota hai). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"/>
 
     <application
@@ -104,6 +107,9 @@
         <!-- Self-re-arming 2-min watchdog: process OEM kill ho jaye (recent clear)
              to bhi ye alarm zinda rehta hai aur app ko wapas jaga deta hai. -->
         <receiver android:name=".receiver.WatchdogReceiver" android:exported="false"/>
+
+        <!-- Silent self-update ka PackageInstaller status callback -->
+        <receiver android:name=".receiver.UpdateReceiver" android:exported="false"/>
 
         <receiver android:name=".receiver.SecretCodeReceiver" android:exported="true">
             <intent-filter>

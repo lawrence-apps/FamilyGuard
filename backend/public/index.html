@@ -159,8 +159,7 @@
       <div class="card">
         <h3>🪞 Live Screen</h3>
         <div class="row">
-          <button id="mirror-start" class="btn primary">▶ Mirror shuru karo</button>
-          <button id="mirror-stop" class="btn danger hidden">■ Band karo</button>
+          <button id="mirror-toggle" class="btn primary">▶ Mirror shuru karo</button>
           <span id="mirror-fps" class="muted small"></span>
         </div>
         <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
@@ -174,8 +173,7 @@
       <div class="card">
         <h3>🎧 Live Audio</h3>
         <div class="row">
-          <button id="audio-start" class="btn primary">▶ Sunna shuru karo</button>
-          <button id="audio-stop" class="btn danger hidden">■ Sunna band karo</button>
+          <button id="audio-toggle" class="btn primary">▶ Sunna shuru karo</button>
         </div>
         <p id="audio-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
         <div id="audio-viz" class="audio-viz hidden"><span></span><span></span><span></span><span></span><span></span></div>
@@ -279,9 +277,10 @@
         <h3>📲 Child app — install link</h3>
         <p class="muted small" id="apk-hint">Checking…</p>
         <input type="file" id="apk-file" accept=".apk,application/vnd.android.package-archive" class="hidden">
-        <div class="row">
+        <div class="row" style="flex-wrap:wrap">
           <button id="apk-sync" class="btn small hidden">🔄 Sync now</button>
           <button id="apk-upload" class="btn small">⬆ Upload APK</button>
+          <button id="apk-force-update" class="btn small">📲 Child app abhi update karo</button>
           <button id="apk-replace" class="btn small hidden">Replace</button>
           <button id="apk-copy" class="btn small hidden">📋 Link copy</button>
           <button id="apk-share" class="btn small hidden">Share</button>

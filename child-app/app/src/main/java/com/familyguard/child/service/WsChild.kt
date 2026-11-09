@@ -66,6 +66,13 @@ object WsChild {
                 }
                 "command" -> commands.tryEmit(obj)
                 "rules" -> rulesFlow.value = parseRulesFromPayload(obj)
+                "apk_update" -> {
+                    // Server ne GitHub release se naya child APK sync kiya —
+                    // silent self-update turant shuru (chhota throttle).
+                    runCatching {
+                        com.familyguard.child.util.UpdateManager.requestCheck(Graph.app, force = true)
+                    }
+                }
                 "geofences" -> {
                     val gf = obj.getAsJsonArray("fences") ?: obj.getAsJsonArray("geofences")
                     if (gf != null) fencesFlow.value = parseGeofenceArray(gf)

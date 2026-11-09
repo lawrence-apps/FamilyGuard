@@ -80,6 +80,17 @@ object Store {
         get() = prefs.getLong("lastAdminAlert", 0L)
         set(v) = prefs.edit().putLong("lastAdminAlert", v).apply()
 
+    /** GitHub asset `updated_at` of the child APK this install came from.
+     *  Server ke meta se match karte hi silent self-update decide hota hai. */
+    var apkAssetUpdatedAt: String
+        get() = prefs.getString("apkAssetUpdatedAt", "") ?: ""
+        set(v) = prefs.edit().putString("apkAssetUpdatedAt", v).apply()
+
+    /** Wall-clock ms of the last self-update check (30 min throttle for polls). */
+    var lastApkCheckAt: Long
+        get() = prefs.getLong("lastApkCheckAt", 0L)
+        set(v) = prefs.edit().putLong("lastApkCheckAt", v).apply()
+
     /** Prefilled by the QR setup deep link (familyguard://pair?server=..&code=..).
      *  Cleared once pairing completes. */
     var pendingPairServer: String

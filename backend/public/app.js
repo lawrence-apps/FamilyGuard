@@ -233,6 +233,13 @@ $("h-switch").onclick = () => {
 function switchChild(cid) {
   S.cid = cid;
   S.apps = []; // purane child ke apps naye child ki list me na ghus jayein
+  // Toggle buttons naye child ki real state par reset — purana child ka
+  // mirror/audio status naye child ke UI me na ghus jaye
+  setMirrorBtn(false); setAudioBtn(false); setRingBtn(false);
+  S.streaming = false;
+  $("mirror-fps").textContent = "";
+  mirrorStatus("", false); audioStatus("", false);
+  const vz = $("audio-viz"); if (vz) vz.classList.add("hidden");
   renderStatus(); renderPairCard();
   loadRules(); loadApps(); loadLocations(); loadFences(); loadAlerts(); renderChildrenList();
 }
@@ -387,10 +394,11 @@ function renderApk(st) {
     const url = S.origin + st.url;
     const mb = st.size ? " · " + (st.size / 1048576).toFixed(1) + " MB" : "";
     if (isGh) {
-      $("apk-hint").textContent = "✅ GitHub se auto-sync: " + (st.releaseTag || "latest") + mb + ". Har naye build ke baad APK khud update ho jati hai — link/QR same rehta hai, kuch karne ki zarurat nahi.";
+      $("apk-hint").textContent = "✅ GitHub se auto-sync: " + (st.releaseTag || "latest") + mb + ". Naya build aate hi bachche ka app KHUD update ho jayegi (bina popup/notification) — link/QR same rehta hai, kuch karne ki zarurat nahi.";
     } else {
       $("apk-hint").textContent = "📦 Manually uploaded" + mb + ". Auto-sync isko replace nahi karega — GitHub build wapas chahiye to \"Sync now\" dabao.";
     }
+    $("apk-force-update").classList.remove("hidden");
     $("apk-link").classList.remove("hidden");
     $("apk-link").textContent = url;
     try {
@@ -406,8 +414,19 @@ function renderApk(st) {
       : "APK GitHub se apne aap aayegi — CI build ke baad khud sync ho jati hai (har 10 min check). \"Sync now\" se turant try karo, ya fallback me manually upload karo.";
     $("apk-link").classList.add("hidden");
     $("apk-qr").classList.add("hidden");
+    $("apk-force-update").classList.add("hidden");
   }
 }
+
+// Child app silent update: server par jo APK hai wahi child phone par push karo
+$("apk-force-update").onclick = () => {
+  if (!S.cid) { alert("Pehle bachcha select karo"); return; }
+  const c = activeChild();
+  if (c && !c.online) {
+    toast("Bachcha offline hai — command queue me hai, connect hote hi update ho jayegi");
+  }
+  sendCmd("update_apk");
+};
 
 $("apk-sync").onclick = async () => {
   $("apk-sync").disabled = true;
@@ -519,9 +538,7 @@ function handleWs(m) {
       // Mirroring ke beech child offline ho gaya to UI stuck na rahe
       if (m.online === false && m.cid === S.cid) {
         if (S.mirrorOn) {
-          S.mirrorOn = false; S.streaming = false;
-          $("mirror-start").classList.remove("hidden");
-          $("mirror-stop").classList.add("hidden");
+          setMirrorBtn(false); S.streaming = false;
           $("mirror-fps").textContent = "";
           mirrorStatus("Child offline ho gaya — mirroring band. Child wapas connect hote hi dobara Start karo.", true);
         }
@@ -569,14 +586,18 @@ function handleWs(m) {
     }
     case "mirror_state": {
       // Child's real mirroring state — LIVE badge aur status hint isi se chalte hain.
+      // Same-button toggle bhi isi se sahi state par atakta hai.
       if (m.cid === S.cid) {
         S.streaming = !!m.streaming;
         if (S.streaming) {
+          setMirrorBtn(true);
           S.lastFrameAt = Date.now(); // grace window for the "no frames" watchdog
           mirrorStatus("Bachche ki screen mirroring chalu ho gayi ✓", false);
         } else if (S.mirrorOn) {
+          setMirrorBtn(true);
           mirrorStatus("Consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
         } else {
+          setMirrorBtn(false);
           mirrorStatus("", false);
         }
       }
@@ -598,6 +619,7 @@ function handleWs(m) {
     case "audio_state": {
       if (m.cid === S.cid) {
         if (m.streaming) {
+          setAudioBtn(true);
           audioStatus("Bachche ka mic live hai 🎧", false);
         } else if (S.audioOn) {
           stopAudioUi();
@@ -708,33 +730,48 @@ function onAudioChunk(b64) {
 }
 
 function stopAudioUi() {
-  S.audioOn = false;
+  setAudioBtn(false);
   if (S.audioCtx) { try { S.audioCtx.close(); } catch (e) {} S.audioCtx = null; }
   S.audioNextAt = 0;
-  const st = $("audio-start"), sp = $("audio-stop"), vz = $("audio-viz");
-  if (st) st.classList.remove("hidden");
-  if (sp) sp.classList.add("hidden");
+  const vz = $("audio-viz");
   if (vz) vz.classList.add("hidden");
   audioStatus("", false);
 }
 
-$("audio-start").onclick = () => {
+// ---- same-button toggles (ring jaisa hi pattern) ----
+function setMirrorBtn(on) {
+  S.mirrorOn = on;
+  const b = $("mirror-toggle");
+  if (!b) return;
+  b.innerHTML = on ? "■ Mirror band karo ✋" : "▶ Mirror shuru karo";
+  b.classList.toggle("danger", on);
+  b.classList.toggle("primary", !on);
+}
+function setAudioBtn(on) {
+  S.audioOn = on;
+  const b = $("audio-toggle");
+  if (!b) return;
+  b.innerHTML = on ? "■ Sunna band karo ✋" : "▶ Sunna shuru karo";
+  b.classList.toggle("danger", on);
+  b.classList.toggle("primary", !on);
+}
+
+$("audio-toggle").onclick = () => {
   if (!S.cid) return;
+  if (S.audioOn) {
+    sendCmd("audio_stop");
+    stopAudioUi();
+    return;
+  }
   if (S.ws && S.ws.readyState === 1) {
     // audio chunks bhi watch_mirror subscription se filter hote hain
     S.ws.send(JSON.stringify({ type: "watch_mirror", cid: S.cid }));
     sendCmd("audio_start");
-    S.audioOn = true;
-    $("audio-start").classList.add("hidden");
-    $("audio-stop").classList.remove("hidden");
+    setAudioBtn(true);
     $("audio-viz").classList.remove("hidden");
     const c = activeChild();
     audioStatus(c && !c.online ? "Bachcha abhi offline hai — connect hote hi mic khud chalu ho jayega." : "Mic connect ho raha hai…", true);
   } else alert("Server se connect nahi hai");
-};
-$("audio-stop").onclick = () => {
-  sendCmd("audio_stop");
-  stopAudioUi();
 };
 
 $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
@@ -1077,6 +1114,8 @@ function mirrorStatus(text, show) {
 }
 
 function onMirrorFrame(buf) {
+  // Band button dabaane ke baad in-flight last frames image ko refresh na karein
+  if (!S.mirrorOn) return;
   const blob = new Blob([buf], { type: "image/jpeg" });
   // purana blob URL revoke karo warna har frame (8/s) memory me jama hota rahega
   const url = URL.createObjectURL(blob);
@@ -1111,34 +1150,29 @@ setInterval(() => {
   }
 }, 3000);
 
-$("mirror-start").onclick = () => {
+$("mirror-toggle").onclick = () => {
   if (!S.cid) return;
   if (S.ws && S.ws.readyState === 1) {
-    S.ws.send(JSON.stringify({ type: "watch_mirror", cid: S.cid }));
-    S.ws.send(JSON.stringify({ type: "mirror_start", cid: S.cid }));
-    S.mirrorOn = true;
-    S.lastFrameAt = Date.now();
-    $("mirror-start").classList.add("hidden");
-    $("mirror-stop").classList.remove("hidden");
-    const c = activeChild();
-    if (c && !c.online) {
-      mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
+    if (S.mirrorOn) {
+      // SAME button ab band karega — child ko mirror_stop, UI turant reset
+      S.ws.send(JSON.stringify({ type: "mirror_stop", cid: S.cid }));
+      setMirrorBtn(false);
+      S.streaming = false;
+      $("mirror-fps").textContent = "";
+      mirrorStatus("Mirror band ho raha hai…", false);
     } else {
-      mirrorStatus("Screen aa rahi hai… (one-time consent pehle se ready — seedha frames aayenge)", true);
+      S.ws.send(JSON.stringify({ type: "watch_mirror", cid: S.cid }));
+      S.ws.send(JSON.stringify({ type: "mirror_start", cid: S.cid }));
+      setMirrorBtn(true);
+      S.lastFrameAt = Date.now();
+      const c = activeChild();
+      if (c && !c.online) {
+        mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
+      } else {
+        mirrorStatus("Screen aa rahi hai… (one-time consent pehle se ready — seedha frames aayenge)", true);
+      }
     }
   } else alert("Server se connect nahi hai");
-};
-$("mirror-stop").onclick = () => {
-  if (S.ws && S.ws.readyState === 1) {
-    S.ws.send(JSON.stringify({ type: "mirror_stop", cid: S.cid }));
-    S.ws.send(JSON.stringify({ type: "watch_mirror", cid: "" }));
-  }
-  S.mirrorOn = false;
-  S.streaming = false;
-  $("mirror-start").classList.remove("hidden");
-  $("mirror-stop").classList.add("hidden");
-  $("mirror-fps").textContent = "";
-  mirrorStatus("", false);
 };
 
 /* ---------------- activity (events + notifications) ---------------- */
