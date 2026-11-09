@@ -37,7 +37,8 @@ const EXT_BY_TYPE = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '
 
 // ---------------------------------------------------------------- health/root
 app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'familyguard-backend', children: db.children.length, parents: db.parents.length, uptime: process.uptime() });
+  // Counts expose karna public server par theek nahi — sirf status batao
+  res.json({ ok: true, service: 'familyguard-backend', uptime: process.uptime() });
 });
 
 // Web dashboard (works on iPhone/Android/desktop browsers — no app needed)
@@ -50,6 +51,12 @@ app.get('/', (req, res) => res.redirect('/app/'));
 
 // ---------------------------------------------------------------- parent auth
 app.post('/api/parent/register', async (req, res) => {
+  // Public-repo safety: pehla parent account khud ban sakta hai; uske baad
+  // registration band — jo server ka URL jaan bhi le, naya account nahi bana sakta.
+  // (Family ka naya parent chahiye to apne existing account se batao.)
+  if (db.parents.length) {
+    return res.status(403).json({ error: 'Registration locked — is server par family account already hai. Sirf existing parent login kar sakta hai.' });
+  }
   const { username, password } = req.body || {};
   if (!username || !password || String(username).length < 4 || String(password).length < 4) {
     return res.status(400).json({ error: 'username and password required (min 4 chars)' });

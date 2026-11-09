@@ -1,4 +1,4 @@
-/* FamilyGuard web dashboard — vanilla JS, no build step. */
+/* BachaGuard web dashboard — vanilla JS, no build step. v5 */
 "use strict";
 
 const S = {
@@ -9,6 +9,7 @@ const S = {
   ws: null,
   wsTimer: null,
   pollTimer: null,
+  usageTimer: null,
   rules: null,
   usage: null,
   apps: [],            // installed apps reported by child (WS "apps")
@@ -27,9 +28,12 @@ const S = {
   addingFence: false,
   events: [],
   notifs: [],
+  synth: [],           // pairing / unpair synthetic activity entries
+  chat: [],            // messages sent to child (session history)
 };
 
 const $ = (id) => document.getElementById(id);
+const RING_C = 326.73; // 2 * PI * 52
 
 /* ---------------- helpers ---------------- */
 function esc(s) {
@@ -44,6 +48,24 @@ function timeAgo(ts) {
   if (d < 3600) return Math.floor(d / 60) + " min ago";
   if (d < 86400) return Math.floor(d / 3600) + " h ago";
   return Math.floor(d / 86400) + " d ago";
+}
+// Hinglish time — "13 ghante pehle", "24 min pehle"
+function timeAgoHi(ts) {
+  if (!ts) return "—";
+  const d = Math.floor((Date.now() - ts) / 1000);
+  if (d < 60) return "abhi abhi";
+  if (d < 3600) return Math.floor(d / 60) + " min pehle";
+  if (d < 86400) {
+    const h = Math.floor(d / 3600);
+    return h === 1 ? "1 ghanta pehle" : h + " ghante pehle";
+  }
+  const dd = Math.floor(d / 86400);
+  return dd + (dd === 1 ? " din pehle" : " din pehle");
+}
+function fmtMin(m) {
+  m = Math.max(0, Math.round(m || 0));
+  if (m >= 60) return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  return m + "m";
 }
 function hhmm(ts) { return new Date(ts).toLocaleString(); }
 
@@ -92,6 +114,16 @@ function toast(msg) {
 $("a-origin").textContent = S.origin;
 $("about-origin").textContent = S.origin;
 
+$("role-parent").onclick = () => {
+  $("role-parent").classList.add("on"); $("role-child").classList.remove("on");
+  $("parent-auth").classList.remove("hidden"); $("child-auth").classList.add("hidden");
+};
+$("role-child").onclick = () => {
+  $("role-child").classList.add("on"); $("role-parent").classList.remove("on");
+  $("child-auth").classList.remove("hidden"); $("parent-auth").classList.add("hidden");
+};
+$("go-parent").onclick = () => $("role-parent").click();
+
 $("a-login").onclick = async () => {
   $("a-err").textContent = "";
   try {
@@ -124,8 +156,13 @@ async function enterApp() {
   await refreshChildren();
   connectWs();
   S.pollTimer = setInterval(refreshChildren, 15000);
+  // Aaj tab khula ho to ring har 30s me fresh — usage badhne par turant dikhe
+  S.usageTimer = setInterval(() => {
+    if (S.cid && !$("tab-aaj").classList.contains("hidden")) loadRules();
+  }, 30000);
   loadAlerts();
   loadApk();
+  loadRules();
   if (!S.children.length) showCreateChild();
 }
 
@@ -137,12 +174,10 @@ async function refreshChildren() {
     if (!S.children.some((c) => c.id === S.cid)) {
       S.cid = S.children.length ? S.children[0].id : null;
     }
-    renderChildSelect();
     renderStatus();
     renderPairCard();
-    renderAdultCard();
     renderChildrenList();
-    if ($("tab-apps").classList.contains("hidden") === false) loadApps();
+    if ($("tab-report").classList.contains("hidden") === false) loadApps();
   } catch (e) {
     if (String(e.message).includes("401") || String(e.message).includes("bad token")) {
       localStorage.removeItem("fg_token"); location.reload();
@@ -150,35 +185,68 @@ async function refreshChildren() {
   }
 }
 
-function renderChildSelect() {
-  const sel = $("child-sel");
-  sel.innerHTML = S.children.map((c) =>
-    '<option value="' + esc(c.id) + '"' + (c.id === S.cid ? " selected" : "") + ">" +
-    esc(c.name) + (c.online ? " 🟢" : "") + "</option>").join("");
-  sel.onchange = () => {
-    S.cid = sel.value;
-    S.apps = []; // purane child ke apps naye child ki list me na ghus jayein
-    renderStatus(); renderPairCard(); renderAdultCard();
-    loadRules(); loadApps(); loadLocations(); loadFences(); loadAlerts();
-  };
+const AVATARS = ["🧒", "👦", "👧", "🐣", "🦄", "🌟", "🐯", "🐨", "🐰", "🦁"];
+function avatarFor(name) {
+  let h = 0;
+  for (const ch of String(name || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATARS[h % AVATARS.length];
+}
+
+function renderHeader() {
+  const c = activeChild();
+  const pill = $("h-live");
+  if (!c) {
+    $("h-avatar").textContent = "🧒";
+    $("h-name").textContent = "Bachcha select karo";
+    $("h-sub").textContent = "Header par tap karke add karo";
+    pill.textContent = "OFFLINE"; pill.className = "pill off";
+    return;
+  }
+  $("h-avatar").textContent = avatarFor(c.name);
+  $("h-name").textContent = c.name;
+  $("h-sub").textContent = c.online ? "Abhi online hai" : "Last seen " + timeAgoHi(c.lastSeen);
+  pill.textContent = c.online ? "LIVE" : "OFFLINE";
+  pill.className = "pill " + (c.online ? "on" : "off");
+}
+
+// Header tap → bachcha switch / add dialog
+$("h-switch").onclick = () => {
+  const items = S.children.map((c) =>
+    '<li><button class="' + (c.id === S.cid ? "cur" : "") + '" data-pick="' + esc(c.id) + '">' +
+    '<span style="font-size:20px">' + avatarFor(c.name) + "</span><span><b>" + esc(c.name) + "</b> " +
+    (c.paired ? (c.online ? "🟢 online" : "⚫ offline") : "⚪ unpaired") + "</span></button></li>").join("");
+  dialog("Kaunsa bachcha?",
+    '<ul class="pick-list">' + (items || '<li class="muted">Koi bachcha nahi — pehle add karo</li>') + "</ul>" +
+    '<button id="pick-add" class="btn wide">➕ Naya bachcha add karo</button>',
+    null);
+  $("dlg-body").querySelectorAll("[data-pick]").forEach((b) => {
+    b.onclick = () => { $("dlg").classList.add("hidden"); switchChild(b.dataset.pick); };
+  });
+  $("pick-add").onclick = () => { $("dlg").classList.add("hidden"); showCreateChild(); };
+};
+
+function switchChild(cid) {
+  S.cid = cid;
+  S.apps = []; // purane child ke apps naye child ki list me na ghus jayein
+  renderStatus(); renderPairCard();
+  loadRules(); loadApps(); loadLocations(); loadFences(); loadAlerts(); renderChildrenList();
 }
 
 function activeChild() { return S.children.find((c) => c.id === S.cid) || null; }
 
 function renderStatus() {
   const c = activeChild();
+  renderHeader();
   if (!c) {
-    $("s-online").textContent = "—"; $("s-batt").textContent = "—";
-    $("s-app").textContent = "—"; $("s-seen").textContent = "—";
+    $("s-batt").textContent = "🔋 —";
+    $("s-app").textContent = "📱 —";
     $("danger-child-name").textContent = "Device: —";
     renderUninstallBanner();
+    updateRing();
     return;
   }
-  $("s-online").innerHTML = c.online
-    ? '<span class="dot on"></span> Online' : '<span class="dot off"></span> Offline';
-  $("s-batt").textContent = c.battery >= 0 ? c.battery + "%" + (c.charging ? " ⚡" : "") : "—";
-  $("s-app").textContent = c.currentApp || "—";
-  $("s-seen").textContent = timeAgo(c.lastSeen);
+  $("s-batt").textContent = c.battery >= 0 ? "🔋 " + c.battery + "%" + (c.charging ? " ⚡" : "") : "🔋 —";
+  $("s-app").textContent = "📱 " + (c.currentApp || "—");
   const h = c.health;
   const labels = {
     service: "Background service", accessibility: "Accessibility", admin: "Device admin",
@@ -189,8 +257,8 @@ function renderStatus() {
   const el = $("s-health");
   if (broken.length) {
     el.classList.remove("hidden");
-    el.innerHTML = "<b>Needs repair:</b> " + broken.join(", ") +
-      ' — the child device self-heals; <button class="btn small" id="heal-btn">Auto-Repair</button>';
+    el.innerHTML = "<b>Repair chahiye:</b> " + broken.join(", ") +
+      ' — bachche ka device khud theek hone ki koshish karega; <button class="btn small" id="heal-btn">🔧 Auto-Repair</button>';
     const hb = document.getElementById("heal-btn");
     if (hb) hb.onclick = () => sendCmd("heal", {});
   } else {
@@ -198,6 +266,8 @@ function renderStatus() {
   }
   $("danger-child-name").textContent = "Device: " + c.name + (c.model ? " · " + c.model : (c.deviceName ? " · " + c.deviceName : ""));
   renderUninstallBanner();
+  renderAdultCard();
+  updateRing();
 }
 
 // Manually-uninstall / phone-off detection: paired child jo 30+ min se server
@@ -209,7 +279,7 @@ function renderUninstallBanner() {
   if (!c || !c.paired || c.online) { card.classList.add("hidden"); return; }
   const idle = Date.now() - (c.lastSeen || 0);
   if (idle < 30 * 60 * 1000) { card.classList.add("hidden"); return; }
-  $("offline-text").innerHTML = "⚠️ <b>" + esc(c.name) + "</b> ka app <b>" + timeAgo(c.lastSeen) + "</b> se server se connect nahi hua. Agar child phone se app uninstall kar di gayi hai (ya phone band/offline hai) to ye normal hai. App wapas chahiye to child phone par dobara install karke same pairing code daalo — nahi chahiye to neeche se device remove kar do.";
+  $("offline-text").innerHTML = "⚠️ <b>" + esc(c.name) + "</b> ka app <b>" + timeAgoHi(c.lastSeen) + "</b> se server se connect nahi hua. Agar child phone se app uninstall kar di gayi hai (ya phone band/offline hai) to ye normal hai. App wapas chahiye to child phone par dobara install karke same pairing code daalo — nahi chahiye to neeche se device remove kar do.";
   card.classList.remove("hidden");
 }
 
@@ -218,7 +288,7 @@ function renderPairCard() {
   const show = !c || !c.paired;
   $("pair-card").classList.toggle("hidden", !show);
   const qrEl = $("pair-qr");
-  if (!show || !c) { qrEl.classList.add("hidden"); if (show) $("pair-code").textContent = "Create a child first"; return; }
+  if (!show || !c) { qrEl.classList.add("hidden"); if (show) $("pair-code").textContent = "Pehle bachcha add karo"; return; }
   $("pair-code").textContent = c.pairingCode;
   // QR setup link: scanning it opens the child app with server+code prefilled and pairs automatically.
   try {
@@ -252,8 +322,8 @@ function ageYears(dob) {
 }
 
 function showCreateChild() {
-  dialog("Add child", `
-    <label>Name</label><input id="dc-name" placeholder="Child name">
+  dialog("Naya bachcha add karo", `
+    <label>Name</label><input id="dc-name" placeholder="Bachche ka naam">
     <label>Date of birth (YYYY-MM-DD)</label><input id="dc-dob" placeholder="2008-06-15">
     <p class="muted small">18 hone par protections auto-release ho jayengi.</p>`,
     async () => {
@@ -262,6 +332,8 @@ function showCreateChild() {
       if (!name) throw new Error("Name required");
       const r = await api("/api/children", "POST", { name, dob });
       S.cid = r.child.id;
+      S.synth.unshift({ t: Date.now(), ico: "🧒", txt: "Naya bachcha add hua: " + name });
+      renderActivity();
       await refreshChildren();
       loadRules(); loadApps(); loadLocations(); loadFences(); loadAlerts();
     });
@@ -281,10 +353,10 @@ function renderChildrenList() {
   $("children-list").innerHTML = S.children.map((c) =>
     '<li><div><b>' + esc(c.name) + "</b> " + (c.online
       ? '<span class="dot on"></span> <span class="meta">online</span>'
-      : '<span class="dot off"></span> <span class="meta">offline · last seen ' + timeAgo(c.lastSeen) + "</span>") +
+      : '<span class="dot off"></span> <span class="meta">offline · last seen ' + timeAgoHi(c.lastSeen) + "</span>") +
     '<br><span class="meta">' + (c.paired ? esc(c.deviceName || "paired") : "code: " + esc(c.pairingCode)) + "</span></div>" +
     '<button class="btn small danger" data-del="' + esc(c.id) + '" style="margin-top:0">Remove device</button></li>').join("") ||
-    '<li class="muted">No children yet</li>';
+    '<li class="muted">Abhi koi bachcha nahi — upar wale button se add karo</li>';
   $("children-list").querySelectorAll("[data-del]").forEach((b) => {
     b.onclick = () => removeDeviceFull(b.dataset.del);
   });
@@ -373,7 +445,7 @@ $("apk-file").onchange = async () => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
     renderApk(data);
-    toast("Child APK uploaded ✓");
+    toast("Child APK upload ho gayi ✓");
   } catch (e) {
     $("apk-hint").textContent = "Upload failed: " + e.message;
   } finally {
@@ -382,19 +454,19 @@ $("apk-file").onchange = async () => {
 };
 $("apk-copy").onclick = async () => {
   const url = S.origin + (S.apk && S.apk.url ? S.apk.url : "");
-  try { await navigator.clipboard.writeText(url); toast("Link copied ✓"); }
-  catch (e) { prompt("Copy this link:", url); }
+  try { await navigator.clipboard.writeText(url); toast("Link copy ho gaya ✓"); }
+  catch (e) { prompt("Ye link copy karo:", url); }
 };
 $("apk-share").onclick = async () => {
   const url = S.origin + (S.apk && S.apk.url ? S.apk.url : "");
   if (navigator.share) {
-    try { await navigator.share({ title: "FamilyGuard Child App", text: "FamilyGuard child app install karo — ye link child phone par kholo:", url }); } catch (e) {}
+    try { await navigator.share({ title: "BachaGuard Child App", text: "Ye link bachche ke phone par kholo — app install ho jayegi:", url }); } catch (e) {}
   } else {
-    window.open("https://wa.me/?text=" + encodeURIComponent("FamilyGuard child app install karo — ye link child phone par kholo: " + url), "_blank");
+    window.open("https://wa.me/?text=" + encodeURIComponent("Ye link bachche ke phone par kholo — app install ho jayegi: " + url), "_blank");
   }
 };
 $("apk-delete").onclick = () => {
-  dialog("Remove uploaded APK?", "<p>Install link band ho jayega. Child phone par pehle se installed app par koi asar nahi hoga. Next auto-sync par GitHub build wapas aa sakta hai.</p>", async () => {
+  dialog("Uploaded APK hatani hai?", "<p>Install link band ho jayega. Child phone par pehle se installed app par koi asar nahi hoga. Next auto-sync par GitHub build wapas aa sakta hai.</p>", async () => {
     await api("/api/apk", "DELETE");
     renderApk({ uploaded: false });
   });
@@ -447,7 +519,7 @@ function handleWs(m) {
         $("mirror-fps").textContent = "";
         mirrorStatus("Child offline ho gaya — mirroring band. Child wapas connect hote hi dobara Start karo.", true);
       }
-      renderStatus(); renderChildSelect();
+      renderStatus();
       break;
     }
     case "location": {
@@ -456,11 +528,11 @@ function handleWs(m) {
       break;
     }
     case "notification": {
-      if (m.cid === S.cid && m.notif) { S.notifs.unshift(m.notif); renderNotifs(); }
+      if (m.cid === S.cid && m.notif) { S.notifs.unshift(m.notif); renderActivity(); }
       break;
     }
     case "event": {
-      if (m.cid === S.cid && m.event) { S.events.unshift(m.event); renderEvents(); }
+      if (m.cid === S.cid && m.event) { S.events.unshift(m.event); renderActivity(); }
       break;
     }
     case "command_result": {
@@ -469,13 +541,13 @@ function handleWs(m) {
       if (m.ok && d.url) {
         $("media-card").classList.remove("hidden");
         $("media-img").src = S.origin + d.url;
-        toast("Capture received ✓");
+        toast("Capture mil gaya ✓ (Live tab dekho)");
       } else if (m.ok && d.lat != null && d.lng != null) {
-        toast("Command done ✓ (" + Number(d.lat).toFixed(5) + ", " + Number(d.lng).toFixed(5) + ")");
+        toast("Ho gaya ✓ (" + Number(d.lat).toFixed(5) + ", " + Number(d.lng).toFixed(5) + ")");
       } else if (m.ok) {
-        toast("Command done ✓");
+        toast("Ho gaya ✓");
       } else {
-        toast("Command failed: " + (d.error || "unknown"));
+        toast("Fail hua: " + (d.error || "unknown"));
       }
       break;
     }
@@ -489,7 +561,7 @@ function handleWs(m) {
         S.streaming = !!m.streaming;
         if (S.streaming) {
           S.lastFrameAt = Date.now(); // grace window for the "no frames" watchdog
-          mirrorStatus("Child screen mirroring chalu ho gaya ✓", false);
+          mirrorStatus("Bachche ki screen mirroring chalu ho gayi ✓", false);
         } else if (S.mirrorOn) {
           mirrorStatus("Consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
         } else {
@@ -498,18 +570,35 @@ function handleWs(m) {
       }
       break;
     }
-    case "pairing": { refreshChildren(); break; }
-    case "children_changed": { refreshChildren(); break; }
+    case "pairing": {
+      S.synth.unshift({ t: Date.now(), ico: "✅", txt: "Bachche ka device pair ho gaya 🎉" });
+      renderActivity();
+      refreshChildren();
+      break;
+    }
+    case "children_changed": {
+      // Kaunsa child gayab hua? (remove/unpair) — activity me synthetic entry
+      const prevIds = S.children.map((c) => c.id);
+      Promise.resolve(refreshChildren()).then(() => {
+        const gone = prevIds.filter((id) => !S.children.some((c) => c.id === id));
+        gone.forEach((id) => {
+          const c = S.children.find((x) => x.id === id); // never true, sirf naam ke liye
+          S.synth.unshift({ t: Date.now(), ico: "🔌", txt: "Bachche ka device unpair/remove ho gaya" + (c ? " (" + c.name + ")" : "") });
+        });
+        if (gone.length) renderActivity();
+      });
+      break;
+    }
     default: break;
   }
 }
 
 /* ---------------- commands ---------------- */
 async function sendCmd(action, params) {
-  if (!S.cid) { alert("Create / select a child first"); return; }
+  if (!S.cid) { alert("Pehle bachcha select karo"); return; }
   try {
     await api("/api/commands", "POST", { cid: S.cid, action, params: params || {} });
-    toast("Sent: " + action);
+    toast("✅ " + action + " bheja gaya" + (activeChild() && !activeChild().online ? " (offline — queue me hai, connect hone par chalega)" : ""));
   } catch (e) { alert(e.message); }
 }
 
@@ -517,10 +606,10 @@ $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
   b.onclick = () => {
     const c = b.dataset.cmd;
     if (c === "lock") {
-      dialog("Lock device", '<label>Message shown on child screen</label><input id="dl-msg" value="Locked by parent">',
+      dialog("Phone lock karo", '<label>Bachche ki screen par message</label><input id="dl-msg" value="Time up! Phone band karo 😊">',
         () => sendCmd("lock", { message: dlgVal("dl-msg") }));
     } else if (c === "message") {
-      dialog("Send message", '<label>Title</label><input id="dm-title"><label>Text</label><input id="dm-text">',
+      dialog("Message bhejo", '<label>Title</label><input id="dm-title"><label>Text</label><input id="dm-text">',
         () => sendCmd("message", { title: dlgVal("dm-title"), text: dlgVal("dm-text") }));
     } else if (c === "cam-front") {
       sendCmd("camera", { facing: "front" });
@@ -531,6 +620,25 @@ $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
     }
   };
 });
+
+$("lock-now").onclick = () => {
+  dialog("Lock Now — phone abhi lock karo?", '<label>Bachche ki screen par message</label><input id="dl-msg2" value="Time up! Phone band karo 😊">',
+    () => sendCmd("lock", { message: dlgVal("dl-msg2") }));
+};
+
+async function bonusTime(n) {
+  if (!S.cid || !S.rules) { alert("Pehle bachcha select karo"); return; }
+  const used = (S.usage && S.usage.totalMin) || 0;
+  const cur = S.rules.dailyScreenTimeMin || 0;
+  S.rules.dailyScreenTimeMin = cur > 0 ? cur + n : used + n;
+  try {
+    await api("/api/rules/" + S.cid, "PUT", S.rules);
+    toast("+" + n + " min bonus de diya ✓ (limit ab " + fmtMin(S.rules.dailyScreenTimeMin) + ")");
+    updateRing();
+  } catch (e) { alert(e.message); }
+}
+$("bonus15").onclick = () => bonusTime(15);
+$("bonus30").onclick = () => bonusTime(30);
 
 function releaseProtections() {
   dialog("Sirf uninstall — record rahega?",
@@ -543,7 +651,7 @@ function releaseProtections() {
 // connect par orphan guard se khud ko clean kar lega.
 function removeDeviceFull(cid) {
   const c = S.children.find((x) => x.id === cid);
-  if (!c) { alert("Create / select a child first"); return; }
+  if (!c) { alert("Pehle bachcha select karo"); return; }
   dialog("Remove device — " + c.name + "?",
     "<p><b>" + esc(c.name) + "</b> ke phone se saari permissions (accessibility, device admin, screen sharing) release hongi, monitoring band hogi aur system uninstall dialog khud khulega — app wahan se uninstall ho jayegi.</p><p>Dashboard se ye device <b>data samet hamesha ke liye delete</b> ho jayega. Agar phone us waqt offline hai to app agle connect par khud clean ho jayegi. <b>Ye undo nahi hota</b> — dobara monitoring ke liye naya pairing code lena hoga.</p>",
     async () => {
@@ -553,13 +661,11 @@ function removeDeviceFull(cid) {
       await api("/api/children/" + cid, "DELETE");
       if (S.cid === cid) S.cid = null;
       await refreshChildren();
-      toast("Device removed ✓");
+      toast("Device remove ho gaya ✓");
     });
 }
 $("release-btn").onclick = releaseProtections;
-$("release-btn-2").onclick = releaseProtections;
-$("remove-device-btn").onclick = () => { S.cid ? removeDeviceFull(S.cid) : alert("Create / select a child first"); };
-$("remove-device-btn-2").onclick = () => { S.cid ? removeDeviceFull(S.cid) : alert("Create / select a child first"); };
+$("remove-device-btn").onclick = () => { S.cid ? removeDeviceFull(S.cid) : alert("Pehle bachcha select karo"); };
 $("offline-remove").onclick = () => { if (S.cid) removeDeviceFull(S.cid); };
 
 /* ---------------- rules (screen time) ---------------- */
@@ -585,7 +691,7 @@ async function loadRules() {
 function renderChipList(id, arr, onRemove) {
   $(id).innerHTML = arr.map((pkg) =>
     "<li><span>" + esc(pkg) + '</span><button class="x">✕</button></li>').join("") ||
-    '<li class="muted">Nothing added</li>';
+    '<li class="muted">Kuch add nahi hai</li>';
   $(id).querySelectorAll(".x").forEach((btn, i) => { btn.onclick = () => { onRemove(arr[i]); renderChipList(id, arr, onRemove); }; });
 }
 
@@ -594,7 +700,7 @@ function renderLimits() {
   const keys = Object.keys(r.appLimits || {});
   $("r-limits").innerHTML = keys.map((pkg) =>
     "<li><span>" + esc(pkg) + ' <span class="meta">' + r.appLimits[pkg].dailyMin + " min/day</span></span>" +
-    '<button class="x">✕</button></li>').join("") || '<li class="muted">No limits</li>';
+    '<button class="x">✕</button></li>').join("") || '<li class="muted">Koi limit nahi</li>';
   $("r-limits").querySelectorAll(".x").forEach((btn, i) => {
     btn.onclick = () => { delete r.appLimits[keys[i]]; renderLimits(); };
   });
@@ -621,7 +727,7 @@ $("r-allowed-add").onclick = () => {
 };
 
 $("save-rules").onclick = async () => {
-  if (!S.cid || !S.rules) { alert("Select a child first"); return; }
+  if (!S.cid || !S.rules) { alert("Pehle bachcha select karo"); return; }
   const r = S.rules;
   r.dailyScreenTimeMin = parseInt($("r-daily").value, 10) || 0;
   r.bedtime = {
@@ -631,19 +737,51 @@ $("save-rules").onclick = async () => {
   };
   try {
     await api("/api/rules/" + S.cid, "PUT", r);
-    toast("Rules saved & pushed ✓");
+    toast("Rules save ho gaye, bachche ko push ho gaye ✓");
+    updateRing();
   } catch (e) { alert(e.message); }
 };
+
+/* ---------------- usage + ring ---------------- */
+function bedtimeActive() {
+  const b = S.rules && S.rules.bedtime;
+  if (!b || !b.enabled) return false;
+  const parse = (s) => {
+    const [h, m] = String(s || "").split(":").map((x) => parseInt(x, 10) || 0);
+    return h * 60 + m;
+  };
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const s = parse(b.start), e = parse(b.end);
+  return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e);
+}
+
+function updateRing() {
+  if (!$("ring-fg")) return;
+  const limit = (S.rules && S.rules.dailyScreenTimeMin) || 0;
+  const used = (S.usage && S.usage.totalMin) || 0;
+  const remaining = limit > 0 ? Math.max(0, limit - used) : null;
+  const frac = limit > 0 ? Math.min(1, Math.max(0, 1 - used / limit)) : 1;
+  const fg = $("ring-fg");
+  fg.style.strokeDashoffset = String(RING_C * (1 - frac));
+  fg.style.stroke = (limit > 0 && remaining === 0) ? "#DC2626"
+    : (limit > 0 && remaining < limit * 0.25) ? "#F59E0B" : "#22C55E";
+  $("ring-label").textContent = limit > 0
+    ? (remaining > 0 ? fmtMin(remaining) + " bache hai" : "Limit poori!")
+    : "Unlimited";
+  $("usage-text").textContent = fmtMin(used) + " use hua" + (limit > 0 ? " / " + fmtMin(limit) + " limit" : " — koi limit nahi");
+  const badge = $("st-badge");
+  if (bedtimeActive()) { badge.className = "badge warn"; badge.textContent = "🌙 Sone ka time — phone band ho jayega"; }
+  else if (limit > 0 && remaining === 0) { badge.className = "badge bad"; badge.textContent = "Limit poori ho gayi 🚫"; }
+  else { badge.className = "badge ok"; badge.textContent = "App khul sakta hai ✅"; }
+}
 
 async function loadUsage() {
   if (!S.cid) return;
   try {
     S.usage = await api("/api/usage/" + S.cid);
   } catch (e) { return; }
-  const used = S.usage.totalMin || 0;
-  const limit = (S.rules && S.rules.dailyScreenTimeMin) || 0;
-  $("usage-text").textContent = used + " min used" + (limit > 0 ? " / " + limit + " min limit" : " (no limit)");
-  $("usage-fill").style.width = (limit > 0 ? Math.min(100, (used / limit) * 100) : (used > 0 ? 12 : 0)) + "%";
+  updateRing();
 }
 
 /* ---------------- apps ---------------- */
@@ -656,6 +794,7 @@ async function loadApps() {
     if (S.cid !== cid) return;
     S.usage = u;
     usageApps = u.apps || {};
+    if ($("tab-aaj").classList.contains("hidden") === false) updateRing();
   } catch (e) {}
   const pkgs = new Set([...Object.keys(usageApps), ...S.apps.map((a) => a.pkg)]);
   const names = {};
@@ -671,7 +810,7 @@ async function loadApps() {
         '<div class="nm"><b>' + esc(name) + "</b><span>" + esc(pkg) + (limits[pkg] ? " · limit " + limits[pkg].dailyMin + "m" : "") + '</span></div>' +
         '<div class="min">' + (u.min || 0) + "m</div>" +
         '<input type="checkbox" data-blk="' + esc(pkg) + '"' + (blocked.has(pkg) ? " checked" : "") + ' title="block"></div>';
-    }).join("") || '<p class="muted">No data yet — child device connect hone par apps sync hongi.</p>';
+    }).join("") || '<p class="muted">Abhi data nahi — bachche ka device connect hone par apps sync hongi.</p>';
   $("apps-list").querySelectorAll("[data-blk]").forEach((cb) => {
     cb.onchange = async () => {
       if (!S.rules) S.rules = await api("/api/rules/" + S.cid);
@@ -682,7 +821,7 @@ async function loadApps() {
         S.rules.blockedApps = S.rules.blockedApps.filter((x) => x !== pkg);
       }
       await api("/api/rules/" + S.cid, "PUT", S.rules);
-      toast(cb.checked ? "Blocked: " + pkg : "Unblocked: " + pkg);
+      toast(cb.checked ? "🚫 Block kar diya: " + pkg : "✅ Block hata diya: " + pkg);
     };
   });
 }
@@ -695,26 +834,25 @@ function initMap() {
     attribution: "© OpenStreetMap", maxZoom: 19
   }).addTo(S.map);
   S.fenceLayer = L.layerGroup().addTo(S.map);
-  // "+ Add safe zone" toggle — iske bina map click kuch nahi karta tha (addingFence
-  // kabhi true set nahi hota tha = geofence banana bilkul broken tha)
+  // "+ Safe zone banao" toggle — iske bina map click kuch nahi karta
   $("fence-add").onclick = () => {
     S.addingFence = !S.addingFence;
     $("fence-add").classList.toggle("primary", S.addingFence);
-    $("fence-add").textContent = S.addingFence ? "✖ Cancel" : "➕ Add safe zone";
+    $("fence-add").textContent = S.addingFence ? "✖ Cancel" : "➕ Safe zone banao";
     $("fence-hint").classList.toggle("hidden", !S.addingFence);
   };
   S.map.on("click", (e) => {
     if (!S.addingFence) return;
     S.addingFence = false;
     $("fence-add").classList.remove("primary");
-    $("fence-add").textContent = "➕ Add safe zone";
+    $("fence-add").textContent = "➕ Safe zone banao";
     $("fence-hint").classList.add("hidden");
-    dialog("New safe zone", `
-      <label>Name</label><input id="gf-name" placeholder="Home / School">
+    dialog("Naya safe zone", `
+      <label>Name</label><input id="gf-name" placeholder="Ghar / School">
       <label>Radius (m): <span id="gf-rv">150</span></label>
       <input id="gf-radius" type="range" min="50" max="1000" value="150" style="width:100%">
       <label>Type</label>
-      <select id="gf-type"><option value="in">Alert when ENTERS</option><option value="out">Alert when EXITS</option></select>`,
+      <select id="gf-type"><option value="in">Andar aaye to alert</option><option value="out">Bahar jaye to alert</option></select>`,
       async () => {
         const radius = parseInt(dlgVal("gf-radius"), 10) || 150;
         const r = await api("/api/geofences/" + S.cid, "POST", {
@@ -744,13 +882,13 @@ function drawTrack() {
   const latlngs = S.track.filter((p) => p.lat && p.lng).map((p) => [p.lat, p.lng]);
   if (S.trackLine) S.trackLine.remove();
   if (latlngs.length) {
-    S.trackLine = L.polyline(latlngs, { color: "#2563eb", weight: 4, opacity: 0.7 }).addTo(S.map);
+    S.trackLine = L.polyline(latlngs, { color: "#16A34A", weight: 4, opacity: 0.7 }).addTo(S.map);
     S.map.fitBounds(S.trackLine.getBounds().pad(0.2), { maxZoom: 16 });
   }
   const last = latlngs[latlngs.length - 1];
   if (last) {
     if (S.marker) S.marker.setLatLng(last);
-    else S.marker = L.circleMarker(last, { radius: 9, color: "#fff", weight: 3, fillColor: "#2563eb", fillOpacity: 1 }).addTo(S.map);
+    else S.marker = L.circleMarker(last, { radius: 9, color: "#fff", weight: 3, fillColor: "#16A34A", fillOpacity: 1 }).addTo(S.map);
   }
 }
 
@@ -781,9 +919,9 @@ function drawFences() {
 
 function renderFenceList() {
   $("fence-list").innerHTML = S.fences.map((f) =>
-    "<li><span><b>" + esc(f.name) + '</b> <span class="meta">' + (f.type === "in" ? "entry" : "exit") + " · " + f.radius + "m</span></span>" +
+    "<li><span><b>" + esc(f.name) + '</b> <span class="meta">' + (f.type === "in" ? "andar aaye par" : "bahar jaye par") + " · " + f.radius + "m</span></span>" +
     '<button class="x" data-fid="' + esc(f.id) + '">🗑</button></li>').join("") ||
-    '<li class="muted">No zones — map par tap karke banao</li>';
+    '<li class="muted">Koi safe zone nahi — map par tap karke banao</li>';
   $("fence-list").querySelectorAll("[data-fid]").forEach((b) => {
     b.onclick = async () => {
       await api("/api/geofences/" + S.cid + "/" + b.dataset.fid, "DELETE");
@@ -828,7 +966,7 @@ setInterval(() => {
   const idle = Date.now() - (S.lastFrameAt || 0);
   if (idle > 12000) {
     mirrorStatus(
-      "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — child ka screen OFF hai ya consent abhi confirm ho raha hai. Child phone ka screen ON karo, phir khud aa jayenge.",
+      "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent abhi confirm ho raha hai. Bachche ka phone screen ON karo, phir khud aa jayenge.",
       true
     );
   } else {
@@ -847,11 +985,11 @@ $("mirror-start").onclick = () => {
     $("mirror-stop").classList.remove("hidden");
     const c = activeChild();
     if (c && !c.online) {
-      mirrorStatus("Child abhi offline hai — command queue ho gayi, child connect hote hi mirroring khud shuru ho jayegi.", true);
+      mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
     } else {
       mirrorStatus("Screen aa rahi hai… (one-time consent pehle se ready — seedha frames aayenge)", true);
     }
-  } else alert("Not connected");
+  } else alert("Server se connect nahi hai");
 };
 $("mirror-stop").onclick = () => {
   if (S.ws && S.ws.readyState === 1) {
@@ -866,7 +1004,7 @@ $("mirror-stop").onclick = () => {
   mirrorStatus("", false);
 };
 
-/* ---------------- alerts ---------------- */
+/* ---------------- activity (events + notifications) ---------------- */
 async function loadAlerts() {
   const cid = S.cid;
   if (!cid) return;
@@ -876,35 +1014,67 @@ async function loadAlerts() {
     if (S.cid !== cid) return;
     S.events = ev.events || [];
     S.notifs = nt.notifications || [];
-    renderEvents(); renderNotifs();
+    renderActivity();
   } catch (e) {}
 }
 
 function prettyType(t) {
   return String(t || "").replace(/_/g, " ");
 }
-function tagClass(t) {
-  if (t === "geofence_enter") return "green";
-  if (t === "geofence_exit") return "orange";
-  if (t === "screentime_over" || t === "app_blocked") return "red";
-  if (t === "released") return "blue";
-  return "grey";
+
+// Event type → [emoji, Hinglish sentence]
+function eventSentence(e) {
+  const d = e.data || {};
+  switch (e.type) {
+    case "geofence_enter": return ["📍", "Safe zone me ghusa gaya" + (d.name ? ": " + d.name : "")];
+    case "geofence_exit": return ["🚪", "Safe zone se bahar gaya" + (d.name ? ": " + d.name : "")];
+    case "released": return ["🎉", "18+ ho gaya — protections khud release ho gaye"];
+    case "accessibility_disabled": return ["⚠️", "Accessibility permission off ho gayi — device khud repair karega"];
+    case "device_admin_disabled": return ["⚠️", "Device admin off ho gaya — device khud repair karega"];
+    default: return ["•", prettyType(e.type)];
+  }
 }
 
-function renderEvents() {
-  $("events-list").innerHTML = S.events.map((e) =>
-    "<li><span class=\"when\">" + hhmm(e.t) + '</span><span class="tag ' + tagClass(e.type) + '">' +
-    esc(prettyType(e.type)) + "</span><div class='d'>" + esc(JSON.stringify(e.data || {}).slice(0, 140)) + "</div></li>").join("") ||
-    '<li class="muted">No events yet</li>';
-}
-function renderNotifs() {
-  $("notifs-list").innerHTML = S.notifs.map((n) =>
-    "<li><span class=\"when\">" + hhmm(n.date) + '</span><div class="t">' + esc(n.title || n.pkg) + "</div>" +
-    "<div class='d'>" + esc(n.text || "") + " <span class='meta'>" + esc(n.pkg) + "</span></div></li>").join("") ||
-    '<li class="muted">Nothing captured yet</li>';
+function renderActivity() {
+  const items = [];
+  (S.events || []).forEach((e) => {
+    const [ico, txt] = eventSentence(e);
+    items.push({ t: e.t, ico, txt, sub: "" });
+  });
+  (S.notifs || []).forEach((n) => {
+    items.push({ t: n.date, ico: "🔔", txt: (n.title || n.pkg || "Notification") + (n.text ? ": " + n.text : ""), sub: n.pkg || "" });
+  });
+  (S.synth || []).forEach((s) => items.push({ t: s.t, ico: s.ico, txt: s.txt, sub: "" }));
+  items.sort((a, b) => (b.t || 0) - (a.t || 0));
+  $("act-list").innerHTML = items.slice(0, 150).map((i) =>
+    '<li class="act-item"><span class="ico">' + i.ico + '</span><div class="txt"><b>' + esc(i.txt) + "</b>" +
+    (i.sub ? "<span>" + esc(i.sub) + "</span>" : "") +
+    '<span style="display:block">🕐 ' + timeAgoHi(i.t) + "</span></div></li>").join("") ||
+    '<li class="muted">Abhi kuch nahi — bachche ka device connect hote hi activity yahan dikhegi.</li>';
 }
 
-/* ---------------- logs ---------------- */
+/* ---------------- chat (parent → child message) ---------------- */
+async function sendChat() {
+  const title = $("chat-title").value.trim();
+  const text = $("chat-text").value.trim();
+  if (!text) { toast("Pehle message likho 🙂"); return; }
+  await sendCmd("message", { title: title || "Family message", text });
+  S.chat.unshift({ title, text, t: Date.now() });
+  $("chat-title").value = ""; $("chat-text").value = "";
+  renderChat();
+}
+$("chat-send").onclick = sendChat;
+$("chat-text").addEventListener("keydown", (ev) => { if (ev.key === "Enter") sendChat(); });
+$("chat-title").addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("chat-text").focus(); });
+
+function renderChat() {
+  $("chat-list").innerHTML = S.chat.map((m) =>
+    '<li><div class="bubble">' + (m.title ? '<div class="bt">' + esc(m.title) + "</div>" : "") +
+    esc(m.text) + '<div class="bw">' + hhmm(m.t) + "</div></div></li>").join("") ||
+    '<li class="muted">Abhi tak koi message nahi bheja — upar se bhejo.</li>';
+}
+
+/* ---------------- call log / sms ---------------- */
 async function loadLogs() {
   if (!S.cid) return;
   try {
@@ -913,12 +1083,12 @@ async function loadLogs() {
       "<li><span class=\"when\">" + hhmm(x.date) + '</span><div class="t"><span class="tag ' +
       (x.type === "missed" ? "red" : x.type === "in" ? "green" : "blue") + '">' + esc(x.type) + "</span>" +
       esc(x.number) + (x.name ? " (" + esc(x.name) + ")" : "") + "</div><div class='d'>" + x.duration + "s</div></li>").join("") ||
-      '<li class="muted">No call log synced (permission optional)</li>';
+      '<li class="muted">Call log sync nahi hua (permission optional hai)</li>';
     const s = await api("/api/sms/" + S.cid);
     $("sms-list").innerHTML = (s.sms || []).map((x) =>
       "<li><span class=\"when\">" + hhmm(x.date) + '</span><div class="t">' + esc(x.number) + "</div>" +
       "<div class='d'>" + esc(x.body || "") + "</div></li>").join("") ||
-      '<li class="muted">No SMS synced (permission optional)</li>';
+      '<li class="muted">SMS sync nahi hua (permission optional hai)</li>';
   } catch (e) {}
 }
 
@@ -930,12 +1100,11 @@ $("nav").querySelectorAll("button[data-tab]").forEach((b) => {
     document.querySelectorAll(".tab").forEach((t) => t.classList.add("hidden"));
     $("tab-" + b.dataset.tab).classList.remove("hidden");
     const t = b.dataset.tab;
-    if (t === "time") loadRules();
-    if (t === "apps") loadApps();
+    if (t === "aaj") { loadRules(); loadAlerts(); }
     if (t === "map") { initMap(); setTimeout(() => S.map && S.map.invalidateSize(), 50); loadLocations(); loadFences(); }
-    if (t === "alerts") loadAlerts();
-    if (t === "logs") loadLogs();
-    if (t === "more") renderChildrenList();
+    if (t === "report") { loadApps(); loadLogs(); }
+    if (t === "set") { loadRules(); renderChildrenList(); }
+    if (t === "chat") renderChat();
   };
 });
 

