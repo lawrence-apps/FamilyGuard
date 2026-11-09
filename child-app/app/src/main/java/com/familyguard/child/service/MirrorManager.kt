@@ -44,6 +44,27 @@ object MirrorManager {
     val isStreaming: Boolean
         get() = synchronized(this) { streamJob?.isActive == true }
 
+    // ---- 🔍 Phone check (mirror_diag) ka honest snapshot ----
+
+    /** Is capture session me ab tak kitne REAL frames aaye. 0 (screen ON hone
+     *  ke baad bhi) = capture block hua — parent ko seedha verdict milta hai. */
+    val frameCount: Long
+        get() = frameSeq
+
+    /** Last REAL frame kitne second pehle aaya (null = is session me aaj tak
+     *  koi frame nahi aaya). */
+    fun lastFrameAgoSec(): Int? {
+        val t = lastFrameAtMs
+        if (t <= 0L) return null
+        return (((android.os.SystemClock.elapsedRealtime() - t) / 1000L)).toInt()
+    }
+
+    /** Bachche ki screen abhi ON hai? (PowerManager.isInteractive) */
+    fun screenOnNow(): Boolean = runCatching {
+        val pm = com.familyguard.child.Graph.app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        pm.isInteractive
+    }.getOrDefault(true)
+
     private var projection: MediaProjection? = null
     private var reader: ImageReader? = null
     private var vdisplay: VirtualDisplay? = null
@@ -65,6 +86,11 @@ object MirrorManager {
      *  ki frame NAYA hai (re-encode) ya purana hai (cached JPEG re-send). */
     @Volatile
     private var frameSeq = 0L
+
+    /** Last REAL frame ka SystemClock.elapsedRealtime() — Phone check (mirror_diag)
+     *  isse batata hai ki aakhri frame kitne second pehle aaya tha. */
+    @Volatile
+    private var lastFrameAtMs = 0L
 
     /** MirrorService wire karta hai — projection session hum release kar dein
      *  (cast icon hatao) to service ko stopSelf karne ke liye. */
@@ -135,6 +161,7 @@ object MirrorManager {
                 fh = h
                 latestFrame = out
                 frameSeq++
+                lastFrameAtMs = android.os.SystemClock.elapsedRealtime()
             }
         } catch (_: Exception) {
         } finally {
@@ -272,8 +299,9 @@ object MirrorManager {
     }
 
     /** "Frames kyun nahi aa rahe" ka REAL jawab: screen OFF to wahi bolo,
-     *  warna OEM capture-stall ka honest message. */
-    private fun stallReason(): String {
+     *  warna OEM capture-stall ka honest message. PUBLIC — mirror_diag isko
+     *  website ko bhejta hai taaki "Phone check" report me asli reason dikhe. */
+    fun stallReason(): String {
         val screenOn = runCatching {
             val pm = com.familyguard.child.Graph.app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             pm.isInteractive

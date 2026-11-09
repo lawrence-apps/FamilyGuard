@@ -228,6 +228,31 @@ object CommandHandler {
                 Pair(true, data)
             }
 
+            "mirror_diag" -> {
+                // 🔍 PHONE CHECK — website "Frames nahi aa rahe" dikha raha ho to
+                // parent ek tap me bachche ke phone ka poora mirror snapshot maang
+                // sakta hai: app version, Android version, screen ON/OFF, consent
+                // state, frame count, last frame age aur phone ka khud ka honest
+                // reason. Andaza nahi — phone khud batata hai dikkat kya hai.
+                data.addProperty("status", "mirror_diag")
+                data.addProperty("androidSdk", Build.VERSION.SDK_INT)
+                data.addProperty("device", android.os.Build.MANUFACTURER.orEmpty() + " " + android.os.Build.MODEL.orEmpty())
+                data.addProperty("screenOn", MirrorManager.screenOnNow())
+                data.add("health", SelfHeal.healthReport(ctx))
+                data.addProperty("frames", MirrorManager.frameCount)
+                val ago = MirrorManager.lastFrameAgoSec()
+                if (ago != null) data.addProperty("lastFrameAgoSec", ago)
+                val pending = Store.pendingMirrorFps
+                if (pending > 0) {
+                    // Consent dialog request hui hai par abhi grant nahi hui
+                    data.addProperty("consentPending", true)
+                    data.addProperty("pendingFps", pending)
+                }
+                val reason = runCatching { MirrorManager.stallReason() }.getOrNull()
+                if (reason != null && !MirrorManager.isStreaming) data.addProperty("stallReason", reason)
+                Pair(true, data)
+            }
+
             "gallery_list" -> {
                 // Parent dashboard "Gallery kholo" — MediaStore metadata + isi
                 // page ke thumbs upload. SIRF ye command pixel transfer karta hai;
