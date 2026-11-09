@@ -2,10 +2,13 @@ package com.familyguard.child.service
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.PixelFormat
 import android.hardware.display.VirtualDisplay
 import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
+import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +43,15 @@ object MirrorManager {
     private var vdisplay: VirtualDisplay? = null
     private var surface: Surface? = null
 
+    /** ImageReader/VirtualDisplay ka handler thread (MirrorService deta hai).
+     *  recreateVirtualDisplay() isi par naya VD banata hai. */
+    private var frameHandler: Handler? = null
+
+    /** MirrorService wire karta hai — projection session hum release kar dein
+     *  (cast icon hatao) to service ko stopSelf karne ke liye. */
+    @Volatile
+    var onSessionDead: (() -> Unit)? = null
+
     @Volatile
     var latestFrame: ByteArray? = null
         private set
@@ -51,12 +63,16 @@ object MirrorManager {
     private var streamJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    fun markActive(p: MediaProjection, r: ImageReader, w: Int, h: Int, dpi: Int, vd: VirtualDisplay) {
+    fun markActive(
+        p: MediaProjection, r: ImageReader, w: Int, h: Int, dpi: Int, vd: VirtualDisplay,
+        handler: Handler
+    ) {
         synchronized(this) {
             projection = p
             reader = r
             vdisplay = vd
             surface = r.surface
+            frameHandler = handler
             fw = w
             fh = h
             dDpi = dpi
@@ -122,22 +138,28 @@ object MirrorManager {
         kickVirtualDisplay()
         streamJob = scope.launch {
             val interval = 1000L / fps.coerceIn(1, 15)
-            // Safety net: while streaming, if the WS stays down (parent app closed
-            // without pressing Stop, network drop, …) for 30 s, just stop sending
-            // frames — the projection session STAYS alive so the next mirror tap
-            // is still instant and popup-free.
+            // Safety net: WS 30 s tak down rahe (parent app band, network drop, …)
+            // to poora session release — cast icon bachche ke phone par baki nahi
+            // rehta. Agla mirror_start fresh consent (auto-confirm) se chalega.
             var wsDownSince = 0L
             // Frames arriving? Nahin to 1.2 s baad ek aur kick (screen rotate/
             // OEM quirk me pehla kick kabhi-kabhi skip hota hai).
             var lastKickAt = android.os.SystemClock.elapsedRealtime()
             var kicks = 0
+            var recreated = false
             while (isActive) {
                 if (!WsChild.connected.value) {
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (wsDownSince == 0L) {
                         wsDownSince = now
                     } else if (now - wsDownSince > 30_000L) {
+                        // WS 30 s se dead (parent band / network gone) — sirf frames
+                        // rokna KAAFI nahi: projection + FGS zinda rehte to cast icon
+                        // bachche ke phone par PERMANENT dikhta tha. Full release —
+                        // agla mirror_start fresh consent (auto-confirm) lega.
                         stopStreaming()
+                        release()
+                        onSessionDead?.invoke()
                         return@launch
                     }
                 } else {
@@ -150,6 +172,25 @@ object MirrorManager {
                         kickVirtualDisplay()
                         lastKickAt = now
                         kicks++
+                    } else if (kicks >= 2 && !recreated && now - lastKickAt > 1_500L) {
+                        // LAST RESORT (Android 14/15 OEM quirks): resize-kick bhi
+                        // kaam na kare to VirtualDisplay ko poori tarah naya banao —
+                        // fresh ImageReader + fresh VD par system ka render pipeline
+                        // poori tarah reset ho jata hai. Per-stream sirf ek baar.
+                        recreated = true
+                        recreateVirtualDisplay()
+                        lastKickAt = now
+                        if (!hasProjection) {
+                            // Recreate bhi fail — honest state bhejo, loop band
+                            stopStreaming()
+                            runCatching {
+                                val m = com.google.gson.JsonObject()
+                                m.addProperty("type", "mirror_state")
+                                m.addProperty("streaming", false)
+                                WsChild.send(m.toString())
+                            }
+                            return@launch
+                        }
                     }
                     delay(100)
                     continue
@@ -185,6 +226,51 @@ object MirrorManager {
         synchronized(this) {
             runCatching { vd.resize(w, h, dDpi + 1) }
             runCatching { vd.resize(w, h, dDpi) }
+        }
+    }
+
+    /** PURANA VirtualDisplay release karke SAME projection par naya VD + naya
+     *  ImageReader banao. Resize-kick na chale (kuch OEMs par display freeze
+     *  rehta hai) to yahi guaranteed reset hai. Naya VD banne ke BAAD hi old
+     *  reader close hota hai — beech me koi frame drop window nahi. */
+    private fun recreateVirtualDisplay() {
+        val p = projection ?: return
+        val w = fw
+        val h = fh
+        if (w <= 0 || h <= 0) return
+        synchronized(this) {
+            val oldVd = vdisplay
+            val oldReader = reader
+            runCatching { oldVd?.setSurface(null) }
+            runCatching { oldVd?.release() }
+            val handler = frameHandler ?: Handler(Looper.getMainLooper())
+            val newReader = runCatching {
+                ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 4)
+            }.getOrNull()
+            if (newReader == null) {
+                hasProjection = false
+                return
+            }
+            val vd = runCatching {
+                p.createVirtualDisplay(
+                    "fg_mirror_r", w, h, dDpi,
+                    android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    newReader.surface, null, handler
+                )
+            }.getOrNull()
+            if (vd == null) {
+                runCatching { newReader.close() }
+                hasProjection = false
+                return
+            }
+            newReader.setOnImageAvailableListener({ r ->
+                r.acquireLatestImage()?.let { onImage(it) }
+            }, handler)
+            reader = newReader
+            vdisplay = vd
+            surface = newReader.surface
+            // Purana reader ab close kar sakte hain (uska VD release ho chuka)
+            runCatching { oldReader?.close() }
         }
     }
 
@@ -243,6 +329,7 @@ object MirrorManager {
             latestFrame = null
             vdisplay = null
             surface = null
+            frameHandler = null
         }
         runCatching { projection?.stop() }
         runCatching { reader?.close() }

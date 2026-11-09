@@ -576,7 +576,10 @@ function handleWs(m) {
       } else if (m.ok) {
         toast("Ho gaya ✓");
       } else {
-        toast("Fail hua: " + (d.error || "unknown"));
+        // Child ke command results me kabhi-kabhi error NESTED hota hai
+        // (audio_start ka {audio:{error:...}}) — sirf d.error padhne par
+        // dashboard hamesha "Fail hua: unknown" dikha raha tha.
+        toast("Fail hua: " + (d.error || (d.audio && d.audio.error) || "unknown"));
       }
       break;
     }

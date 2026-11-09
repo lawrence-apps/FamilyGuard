@@ -143,7 +143,10 @@ function handleChildMessage(cid, msg, raw) {
       break;
     }
     case 'audio_state': {
-      broadcastToParents({ type: 'audio_state', cid, streaming: !!msg.streaming });
+      // error bhi forward karo — child "Mic blocked…"/permission ka saaf message
+      // bhejta hai; bina iske parent dashboard "unknown" dikha raha tha.
+      const err = typeof msg.error === 'string' && msg.error ? msg.error : undefined;
+      broadcastToParents({ type: 'audio_state', cid, streaming: !!msg.streaming, error: err });
       break;
     }
     case 'ring_state': {
@@ -186,7 +189,14 @@ function handleParentMessage(ws, msg) {
     case 'mirror_stop': {
       const cid = msg.cid;
       if (!cid) return;
-      sendToChild(cid, { type: 'command', id: require('./auth').rid(), action: 'mirror_stop', params: {} });
+      const stopCmd = { id: require('./auth').rid(), action: 'mirror_stop', params: {} };
+      if (!sendToChild(cid, { type: 'command', id: stopCmd.id, action: stopCmd.action, params: {} })) {
+        // Child offline: command QUEUE karo — warna reconnect par mirror_stop
+        // kho jata hai aur bachche ke phone par cast icon FOREVER chalu rehta hai.
+        if (!db().commandQueue[cid]) db().commandQueue[cid] = [];
+        db().commandQueue[cid].push(stopCmd);
+        store.save();
+      }
       break;
     }
     default:

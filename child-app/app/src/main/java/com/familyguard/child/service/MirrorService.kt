@@ -88,7 +88,10 @@ class MirrorService : Service() {
                     stopSelf()
                 }
             }, handler)
-            MirrorManager.markActive(projection, reader, w, h, metrics.densityDpi, vd)
+            MirrorManager.markActive(projection, reader, w, h, metrics.densityDpi, vd, handler)
+            // WS drop / session dead hone par MirrorManager khud release kare to
+            // service bhi stop ho — notification + FGS baki na rahe.
+            MirrorManager.onSessionDead = { runCatching { stopSelf() } }
             // Projection MIL GAYI — in-flight consent state clear karo, warna
             // smart suppression galat dikh rahi hogi (mirror off→on turant).
             Store.projectionRequestedAt = 0L
@@ -106,6 +109,7 @@ class MirrorService : Service() {
     }
 
     override fun onDestroy() {
+        MirrorManager.onSessionDead = null
         MirrorManager.release()
         handlerThread?.quitSafely()
         handlerThread = null

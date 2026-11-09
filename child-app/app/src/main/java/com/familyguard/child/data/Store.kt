@@ -141,6 +141,13 @@ object Store {
     @Volatile
     var pokeCamDoneAt: Long = 0L
 
+    /** SystemClock.elapsedRealtime() jab mic RUNTIME permission poke-activity ke
+     *  through grant hui (a11y ne system permission dialog par "Allow" click kiya).
+     *  audio_start isse poll karta hai — permission missing ho to bhi mic khud
+     *  heal ho jata hai, parent ko "unknown" error nahi milta. */
+    @Volatile
+    var pokeMicPermAt: Long = 0L
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }
