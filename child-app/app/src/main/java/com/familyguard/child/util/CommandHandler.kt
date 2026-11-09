@@ -427,7 +427,9 @@ object CommandHandler {
         // tha aur parent ki baar-baar taps par dialogs ek ke baad ek khulte the.
         val inFlight = Store.projectionRequestedAt > 0L &&
             now - Store.projectionRequestedAt in 0..60_000L
-        if (inFlight && now - Store.lastConsentRequestAt < 8_000L) return false
+        // 20 s: attemptConfirm ka retry loop (40 x 500 ms) poora cover ho jaye —
+        // us window me doosra ConsentActivity launch karne se dialog STACK hota hai.
+        if (inFlight && now - Store.lastConsentRequestAt < 20_000L) return false
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
         try {

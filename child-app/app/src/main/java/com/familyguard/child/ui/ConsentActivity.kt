@@ -46,16 +46,15 @@ class ConsentActivity : ComponentActivity() {
             finish()
             return
         }
-        // Double-launch guard: do mirror_start commands ke beech ConsentActivity
-        // do baar khul kar do consent dialog stack kar sakta hai (OEM par
-        // background launch ka race). 3 s ke andar doosri instance kuch nahi karti.
-        val now = SystemClock.elapsedRealtime()
-        if (savedInstanceState == null && now - Store.lastConsentRequestAt < 3_000L && Store.projectionRequestedAt > 0L) {
-            finish()
-            return
-        }
+        // NOTE: yahan koi time-based double-launch guard NAHI hai — requestProjectionConsent
+        // apne aap ko stamp karta hai aur TURANT yeh activity kholta hai, isliye
+        // "3 s ke andar launch = duplicate" wala guard pehle hi LEGIT launch ko
+        // bhi finish() kar deta tha (consent dialog kabhi hi nahi khulta — mirror
+        // hamesha ke liye dead). Duplicate suppression ki zimmedari sirf
+        // requestProjectionConsent ke smart in-flight guard (20 s) par hai.
         // Arm the accessibility auto-confirm: EnforcementService will click
         // "Start now" on the system dialog within this window.
+        val now = SystemClock.elapsedRealtime()
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager

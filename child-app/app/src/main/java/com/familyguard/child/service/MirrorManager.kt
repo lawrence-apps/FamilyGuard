@@ -38,6 +38,10 @@ object MirrorManager {
     var hasProjection = false
         private set
 
+    /** Abhi actual streaming chal rahi hai? (Website diag ke liye) */
+    val isStreaming: Boolean
+        get() = synchronized(this) { streamJob?.isActive == true }
+
     private var projection: MediaProjection? = null
     private var reader: ImageReader? = null
     private var vdisplay: VirtualDisplay? = null

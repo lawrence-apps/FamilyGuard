@@ -558,6 +558,7 @@ function handleWs(m) {
         setTimeout(() => { if (S.cid === m.cid) loadLogs(); }, 20000);
       }
       if (m.cid === S.cid && !$("tab-report").classList.contains("hidden")) permDiag();
+      if (m.cid === S.cid && !$("tab-live").classList.contains("hidden")) renderLiveDiag();
       renderStatus();
       break;
     }
@@ -1324,6 +1325,36 @@ function syncLogsNow() {
 }
 $("logs-sync").onclick = syncLogsNow;
 
+/* ---------------- live tab diag (mirror/mic kyu nahi chal raha) ---------------- */
+function renderLiveDiag() {
+  const c = activeChild();
+  const el = $("live-diag");
+  if (!el) return;
+  if (!c || !c.online) { el.classList.add("hidden"); return; }
+  const h = c.health || {};
+  const issues = [];
+  // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
+  if (typeof h.versionCode === "number" && h.versionCode < 2) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v2) — Android 14/15 mirror+mic fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  }
+  if (h.accessibility === false) {
+    issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");
+  }
+  if (h.overlay === false) {
+    issues.push("<b>Display over other apps OFF hai</b> — background se consent/invisible activity nahi khulti, isliye mic/mirror request chupchap fail hoti hai. <b>Fix:</b> Settings → Apps → Device Health → Display over other apps → Allow.");
+  }
+  if (h.mic === false) {
+    issues.push("<b>Mic permission OFF hai</b> — live audio start par app khud heal karegi (invisible dialog auto-Allow), par overlay/accessibility on hona zaroori hai.");
+  }
+  if (h.canInstall === false) {
+    issues.push("<b>Install unknown apps OFF hai</b> — silent self-update install nahi ho payega. <b>Fix:</b> Settings → Apps → Device Health → Install unknown apps → Allow (app khud bhi heal karti hai).");
+  }
+  if (!issues.length) { el.classList.add("hidden"); return; }
+  el.innerHTML = "<b>🔧 Mirror/Audio diag — " + issues.length + " dikkat" + (issues.length > 1 ? " mile" : " mili") + ":</b><ul style=\"margin:6px 0 0 16px;padding:0\">" +
+    issues.map((t) => "<li style=\"margin-top:4px\">" + t + "</li>").join("") + "</ul>";
+  el.classList.remove("hidden");
+}
+
 /* ---------------- tabs ---------------- */
 $("nav").querySelectorAll("button[data-tab]").forEach((b) => {
   b.onclick = () => {
@@ -1335,6 +1366,7 @@ $("nav").querySelectorAll("button[data-tab]").forEach((b) => {
     if (t === "aaj") { loadRules(); loadAlerts(); }
     if (t === "map") { initMap(); setTimeout(() => S.map && S.map.invalidateSize(), 50); loadLocations(); loadFences(); }
     if (t === "report") { loadApps(); loadLogs(); permDiag(); }
+    if (t === "live") { renderLiveDiag(); }
     if (t === "set") { loadRules(); renderChildrenList(); }
     if (t === "chat") renderChat();
   };

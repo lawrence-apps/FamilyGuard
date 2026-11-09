@@ -106,6 +106,19 @@ object SelfHeal {
             if (Build.VERSION.SDK_INT < 33) true else granted(ctx, Manifest.permission.POST_NOTIFICATIONS)
         )
         o.addProperty("mirrorReady", MirrorManager.hasProjection)
+        o.addProperty("mirrorStreaming", MirrorManager.isStreaming)
+        // Silent self-update diagnosis: installed APK version + install permission.
+        // Website inhe dekh kar saaf bata pata hai ki phone par PURANA build hai
+        // ("same problem" ki #1 wajah — fix code phone tak pahuncha hi nahi).
+        runCatching {
+            val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+            o.addProperty("versionCode", if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong())
+            o.addProperty("versionName", pi.versionName ?: "")
+        }
+        o.addProperty(
+            "canInstall",
+            runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+        )
         o.addProperty(
             "batteryOk",
             runCatching {
