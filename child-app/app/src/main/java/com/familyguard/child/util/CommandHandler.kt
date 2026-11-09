@@ -23,6 +23,7 @@ import com.familyguard.child.data.Store
 import com.familyguard.child.service.Locator
 import com.familyguard.child.service.AudioStreamer
 import com.familyguard.child.service.MirrorManager
+import com.familyguard.child.service.MirrorService
 import com.familyguard.child.service.WsChild
 import com.familyguard.child.ui.BlockOverlay
 import com.familyguard.child.ui.ConsentActivity
@@ -160,12 +161,15 @@ object CommandHandler {
             }
 
             "mirror_stop" -> {
-                // Stop frames only — the projection session STAYS warm (one-time
-                // consent design). Ending the session would force a fresh consent
-                // dialog on the next Start; keeping it means the parent's next tap
-                // streams within ~1 s with NO popup.
+                // FULL stop: frames + projection session dono band. Cast icon aur
+                // "Screen sharing" notification turant hat jate hain — pehle session
+                // warm rehti thi, isi liye notification me cast PERMANENT dikhta tha.
+                // Agla mirror_start consent dialog khud khol kar accessibility se
+                // auto-confirm kar dega (~1-2 s), phir frames turant chalenge.
                 MirrorManager.stopStreaming()
                 Store.pendingMirrorFps = -1
+                MirrorManager.release()
+                runCatching { ctx.stopService(Intent(ctx, MirrorService::class.java)) }
                 sendMirrorState(false)
                 Pair(true, data)
             }

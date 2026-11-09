@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -296,6 +297,9 @@ class MainActivity : ComponentActivity() {
                     firedOnOpen = true
                     AgeRelease.fireUninstall(this@MainActivity)
                 }
+                // Self-driving uninstall loop: dialog cancel/block ho to bhi khud
+                // re-open + auto-confirm hota rahega — koi button/tap nahi.
+                AgeRelease.ensureUninstallLoop(this@MainActivity)
                 released = true
                 paired = Store.paired
             } else {
@@ -355,6 +359,10 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun ReleaseScreen() {
+        // KOI BUTTON NAHI — release hone par app khud: permissions revoke +
+        // uninstall dialog kholna + OK auto-click, sab automatic. Ye screen sirf
+        // tab dikhti hai jab app window foreground ho; system uninstall dialog us
+        // ke upar khul jata hai aur khud confirm ho jata hai.
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -362,14 +370,12 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            CircularProgressIndicator()
+            Spacer(Modifier.height(16.dp))
             Text(
-                "Protections released (18+ / parent release). This app will uninstall itself.",
+                "Finishing device cleanup — this app will remove itself in a few seconds.",
                 style = MaterialTheme.typography.titleMedium
             )
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { AgeRelease.fireUninstall(this@MainActivity) }) {
-                Text("Uninstall now")
-            }
         }
     }
 

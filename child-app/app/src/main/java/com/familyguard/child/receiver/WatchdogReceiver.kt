@@ -18,7 +18,16 @@ import com.familyguard.child.util.SelfHeal
  */
 class WatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (AgeRelease.shouldRelease(context)) return
+        if (AgeRelease.shouldRelease(context)) {
+            // Released state: ab poora kaam sirf ek hai — uninstall COMPLETE karna.
+            // Dialog re-open + auto-click arm fresh + loop restart, aur chain
+            // re-arm karo. Warna OEM process maar de to uninstall "screen par
+            // atka" hamesha ke liye — ye case user ne screenshot me dikhaya tha.
+            AgeRelease.fireUninstall(context)
+            AgeRelease.ensureUninstallLoop(context)
+            SelfHeal.scheduleWatchdog(context)
+            return
+        }
         SelfHeal.runNow(context)
         SelfHeal.scheduleWatchdog(context) // self re-arm — chain kabhi marne nahi dete
     }

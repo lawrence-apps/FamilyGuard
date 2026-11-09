@@ -621,6 +621,10 @@ function handleWs(m) {
         if (m.streaming) {
           setAudioBtn(true);
           audioStatus("Bachche ka mic live hai 🎧", false);
+        } else if (m.error) {
+          // Child ne saaf bataya: mic system me blocked hai (Android 14 while-in-use)
+          stopAudioUi();
+          audioStatus(m.error, true);
         } else if (S.audioOn) {
           stopAudioUi();
           toast("Mic band ho gaya (child side se)");
@@ -816,7 +820,7 @@ $("bonus30").onclick = () => bonusTime(30);
 
 function releaseProtections() {
   dialog("Sirf uninstall — record rahega?",
-    "<p>Child device par accessibility + admin disable hoga, monitoring band hogi aur system uninstall dialog khud khulega — wahan se app uninstall ho jayegi. <b>Dashboard me device record rahega</b> — dobara same pairing code se pair kar sakte ho. Continue?</p>",
+    "<p>Child phone par app saari permissions khud hata kar system uninstall dialog khud khol degi aur use <b>khud hi confirm bhi kar degi</b> — wahan <b>ek bhi tap nahi lagega</b>, app apne aap uninstall ho jayegi. <b>Dashboard me device record rahega</b> — dobara same pairing code se pair kar sakte ho. Continue?</p>",
     () => sendCmd("release_protections"));
 }
 
@@ -827,7 +831,7 @@ function removeDeviceFull(cid) {
   const c = S.children.find((x) => x.id === cid);
   if (!c) { alert("Pehle bachcha select karo"); return; }
   dialog("Remove device — " + c.name + "?",
-    "<p><b>" + esc(c.name) + "</b> ke phone se saari permissions (accessibility, device admin, screen sharing) release hongi, monitoring band hogi aur system uninstall dialog khud khulega — app wahan se uninstall ho jayegi.</p><p>Dashboard se ye device <b>data samet hamesha ke liye delete</b> ho jayega. Agar phone us waqt offline hai to app agle connect par khud clean ho jayegi. <b>Ye undo nahi hota</b> — dobara monitoring ke liye naya pairing code lena hoga.</p>",
+    "<p><b>" + esc(c.name) + "</b> ke phone se app saari permissions khud hata kar system uninstall dialog khud khol kar <b>khud hi confirm kar degi</b> — phone par <b>ek bhi tap nahi lagega</b>, app apne aap uninstall ho jayegi. Monitoring abhi turant band ho jayegi.</p><p>Dashboard se ye device <b>data samet hamesha ke liye delete</b> ho jayega. Agar phone us waqt offline hai to app agle connect par khud clean ho jayegi. <b>Ye undo nahi hota</b> — dobara monitoring ke liye naya pairing code lena hoga.</p>",
     async () => {
       // 1) child online hai to abhi permissions strip + uninstall dialog fire karo
       try { await api("/api/commands", "POST", { cid, action: "release_protections", params: {} }); } catch (e) {}
@@ -1169,7 +1173,7 @@ $("mirror-toggle").onclick = () => {
       if (c && !c.online) {
         mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
       } else {
-        mirrorStatus("Screen aa rahi hai… (one-time consent pehle se ready — seedha frames aayenge)", true);
+        mirrorStatus("Screen aa rahi hai… (consent dialog khud confirm ho jata hai — 2–5 sec me frames)", true);
       }
     }
   } else alert("Server se connect nahi hai");

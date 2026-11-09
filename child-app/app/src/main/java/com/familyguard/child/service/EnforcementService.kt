@@ -46,6 +46,10 @@ class EnforcementService : AccessibilityService() {
         val ev = event ?: return
         if (ev.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = ev.packageName?.toString() ?: return
+        // Installer/uninstaller window dikha? Timestamp refresh karo — AgeRelease ka
+        // uninstall loop isi se pata karta hai ki dialog abhi screen par khula hai
+        // (dobara ACTION_DELETE fire karke dialogs stack na kare).
+        if (pkg in INSTALLER_PKGS) lastInstallerSeenAt = SystemClock.elapsedRealtime()
         if (pkg == packageName) return
 
         // Reboot recovery: the system MediaProjection consent dialog just opened after
@@ -113,6 +117,22 @@ class EnforcementService : AccessibilityService() {
     companion object {
         @Volatile
         var lastApp = ""
+
+        // ---- uninstall-dialog foreground tracking (AgeRelease loop ke liye) ----
+
+        /** Packages jo system ka uninstall/install confirm dialog host karte hain. */
+        val INSTALLER_PKGS = setOf(
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.miui.packageinstaller",
+            "com.miui.securitycenter",
+            "com.samsung.android.packageinstaller"
+        )
+
+        /** Last time jab installer dialog window screen par dikha (elapsedRealtime).
+         *  0 = kabhi nahi. AgeRelease.fireUninstall isse stacked-dialog guard me use karta hai. */
+        @Volatile
+        var lastInstallerSeenAt = 0L
 
         val minutesToday = ConcurrentHashMap<String, Int>()
 

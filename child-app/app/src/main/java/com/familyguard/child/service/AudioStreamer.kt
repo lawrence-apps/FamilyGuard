@@ -54,12 +54,31 @@ object AudioStreamer {
                 rec?.startRecording()
                 sendState(true)
                 val buf = ByteArray(CHUNK_BYTES)
+                var zeroChunks = 0
                 while (streaming && WsChild.connected.value) {
                     val n = rec?.read(buf, 0, buf.size) ?: -1
                     if (n <= 0) {
                         Thread.sleep(20)
                         continue
                     }
+                    // Android 14 while-in-use rule: FGS background me start hui ho
+                    // to system mic SILENTLY mute kar deta hai — AudioRecord chupchap
+                    // zeros deta hai ("mic ni kaam karra" ka root cause). 3 s tak
+                    // pure zeros = blocked — parent ko saaf batao, jhooth na bolo.
+                    var silent = true
+                    for (i in 0 until n) {
+                        if (buf[i].toInt() != 0) { silent = false; break }
+                    }
+                    if (silent) {
+                        zeroChunks++
+                        if (zeroChunks >= 30) {
+                            streaming = false
+                            sendState(false, "Mic blocked — child phone par Device Health app ek baar khol kar dobara Start karo")
+                            break
+                        }
+                        continue
+                    }
+                    zeroChunks = 0
                     val m = JsonObject()
                     m.addProperty("type", "audio")
                     m.addProperty("data", Base64.encodeToString(buf, 0, n, Base64.NO_WRAP))
@@ -86,11 +105,12 @@ object AudioStreamer {
         if (was) sendState(false)
     }
 
-    private fun sendState(on: Boolean) {
+    private fun sendState(on: Boolean, err: String? = null) {
         runCatching {
             val m = JsonObject()
             m.addProperty("type", "audio_state")
             m.addProperty("streaming", on)
+            if (err != null) m.addProperty("error", err)
             WsChild.send(m.toString())
         }
     }

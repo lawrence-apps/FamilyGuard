@@ -31,9 +31,9 @@ class MirrorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ServiceCompat.startForeground(
             this, 2,
-            // "ready": the session stays warm even when nobody is streaming —
-            // "active" would be a lie while the surface is detached (idle).
-            buildNotif("Screen sharing ready"),
+            // Fresh-session design: ye service sirf tab zinda hai jab projection
+            // chal rahi hai (mirror_stop par release+stop hota hai).
+            buildNotif("Screen sharing active"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         )
         if (AgeRelease.shouldRelease(this)) {
