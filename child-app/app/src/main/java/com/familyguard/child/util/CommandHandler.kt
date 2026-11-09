@@ -267,6 +267,8 @@ object CommandHandler {
                     val page = com.google.gson.JsonArray()
                     var uploaded = 0
                     var i = offset
+                    var failStreak = 0
+                    var thumbFails = 0
                     while (i < all.size() && uploaded < PAGE_SIZE) {
                         val item = all.get(i).asJsonObject.deepCopy()
                         val id = item.get("id").asString
@@ -274,13 +276,34 @@ object CommandHandler {
                         if (f != null) {
                             val url = runCatching { Api.uploadMedia(f) }.getOrNull()
                             runCatching { f.delete() }
-                            if (!url.isNullOrBlank()) item.addProperty("thumb", url)
+                            if (!url.isNullOrBlank()) {
+                                item.addProperty("thumb", url)
+                                failStreak = 0
+                            } else {
+                                thumbFails++
+                                failStreak++
+                                // FAIL-FAST: pehle 3 thumb upload hi fail ho gaye
+                                // (net dead / server unreachable) to baaki 15 ka
+                                // wait karna bekaar hai — 1-2 min tak command
+                                // hang hota tha aur parent ko "gallery ni chal
+                                // raha" lagta tha. Ab turant wapas, honest reason.
+                                if (failStreak >= 3) {
+                                    data.addProperty("error", "thumbs upload fail — bachche ke phone ka net/server reachable nahi")
+                                    data.addProperty("thumbFails", thumbFails)
+                                    data.addProperty("status", "gallery")
+                                    data.addProperty("total", all.size())
+                                    data.addProperty("offset", offset)
+                                    data.add("items", page)
+                                    return Pair(false, data)
+                                }
+                            }
                         }
                         page.add(item)
                         uploaded++
                         i++
                     }
                     data.addProperty("status", "gallery")
+                    if (thumbFails > 0) data.addProperty("thumbFails", thumbFails)
                     data.addProperty("total", all.size())
                     data.addProperty("offset", offset)
                     data.add("items", page)
@@ -387,6 +410,8 @@ object CommandHandler {
                 // Parent ne "Child app update" button dabaya — silent self-update
                 // abhi check karo (server par naya APK ho to khud install ho jayega).
                 val status = com.familyguard.child.util.UpdateManager.checkAndInstall(ctx)
+                Store.lastUpdateStatus = status
+                Store.lastUpdateAt = System.currentTimeMillis()
                 data.addProperty("status", status)
                 Pair(true, data)
             }

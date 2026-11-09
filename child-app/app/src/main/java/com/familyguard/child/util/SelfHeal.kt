@@ -119,6 +119,15 @@ object SelfHeal {
             "canInstall",
             runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
         )
+        // Auto-update diagnosis — "update apne aap kyun nahi hua?" ka honest jawab.
+        // lastUpdateStatus wo string hai jo checkAndInstall ne khud return ki thi
+        // (up-to-date / installing / screen off — postponed / error: …).
+        if (Store.lastUpdateStatus.isNotBlank()) {
+            o.addProperty("updateStatus", Store.lastUpdateStatus)
+            if (Store.lastUpdateAt > 0) {
+                o.addProperty("updateAgeMin", ((System.currentTimeMillis() - Store.lastUpdateAt) / 60_000L).toInt())
+            }
+        }
         o.addProperty(
             "batteryOk",
             runCatching {

@@ -130,14 +130,23 @@ class MainService : Service() {
         scope.launch { statusLoop() }
         scope.launch { persistLoop() }
         scope.launch {
+            // PARALLEL command execution — pehle ye collect ek hi coroutine me
+            // sequential tha: gallery_list ke andar 18 thumbnails ka upload 1–2
+            // min leta tha aur USI WAQT mirror_start/ring/audio sab queue me
+            // atke rehte the ("gallery or mirror dono ni chal ra" ka asli
+            // reason). Ab har command apne coroutine me chalta hai — ek lambi
+            // command doosri ko block nahi karti. Mirror commands andar se
+            // synchronized hain isliye race-safe.
             WsChild.commands.collect { cmd ->
-                val (ok, data) = CommandHandler.execute(applicationContext, cmd)
-                val out = JsonObject()
-                out.addProperty("type", "command_result")
-                out.addProperty("id", cmd.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: "")
-                out.addProperty("ok", ok)
-                out.add("data", data)
-                WsChild.send(out.toString())
+                scope.launch {
+                    val (ok, data) = CommandHandler.execute(applicationContext, cmd)
+                    val out = JsonObject()
+                    out.addProperty("type", "command_result")
+                    out.addProperty("id", cmd.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: "")
+                    out.addProperty("ok", ok)
+                    out.add("data", data)
+                    WsChild.send(out.toString())
+                }
             }
         }
     }

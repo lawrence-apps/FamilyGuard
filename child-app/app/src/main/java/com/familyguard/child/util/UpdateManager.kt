@@ -52,7 +52,13 @@ object UpdateManager {
         val gap = if (force) 2 * 60_000L else 5 * 60_000L
         if (now - Store.lastApkCheckAt < gap) return
         Store.lastApkCheckAt = now
-        scope.launch { checkAndInstall(ctx.applicationContext) }
+        scope.launch {
+            val st = checkAndInstall(ctx.applicationContext)
+            // Phone check (mirror_diag) ko honest answer dene ke liye — "auto
+            // update ni hora" ka jawab phone khud deta hai, guess nahi.
+            Store.lastUpdateStatus = st
+            Store.lastUpdateAt = System.currentTimeMillis()
+        }
     }
 
     /** Returns a short status string; safe to call from anywhere. */
@@ -94,6 +100,28 @@ object UpdateManager {
             try {
                 Api.downloadApk(apk, url)
                 if (!apk.exists() || apk.length() < 1000) return "download failed"
+                // VERSION-AWARE SKIP: APK archive ka versionCode padho — agar
+                // installed se chhota/barabar hai to INSTALL MAT KARO (bas stamp
+                // save ho). Warna manual update ke baad bhi purana stamp bacha
+                // rehta tha -> wahi APK baar-baar download + install dialog
+                // pop hota rahta tha (silent update "kaam ni kar raha" lagta
+                // tha). Ab: same-version APK par chupchaap stamp save — loop
+                // khatam, agli naya build aane par turant install.
+                val curVc = runCatching {
+                    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                    if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode
+                    else @Suppress("DEPRECATION") pi.versionCode.toLong()
+                }.getOrDefault(0L)
+                val arcVc = runCatching {
+                    ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)?.let {
+                        if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode
+                        else @Suppress("DEPRECATION") it.versionCode.toLong()
+                    }
+                }.getOrNull()
+                if (arcVc != null && arcVc <= curVc) {
+                    Store.apkAssetUpdatedAt = stamp
+                    return "already latest (build $arcVc installed)"
+                }
                 // "Install" auto-click ARM karo commit se PEHLE — dialog khulte hi
                 // EnforcementService click kar dega (120 s window).
                 Store.autoClickStep = "install"

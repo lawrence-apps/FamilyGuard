@@ -417,10 +417,18 @@ async function syncApkFromGithub({ manual = false } = {}) {
     if (!asset) return { ok: false, ...base, reason: `asset "${GH_CHILD_ASSET}" release me nahi mila` };
 
     const cur = apkMeta();
-    // Manual upload is a deliberate override — background sync must not replace it.
-    // (Missing source = legacy manual upload from before auto-sync existed.)
+    // Manual upload override — par SIRF tab tak jab tak wo GitHub release se
+    // nayi hai. Pehle ye override HAMESHA jeet leta tha: ek dafa manual upload
+    // hone par background sync hamesha ke liye band ho jata tha aur server
+    // purana APK hi baant-ta rehta (child ka auto-update kabhi trigger hi nahi
+    // hota tha — "manual update kar diya, auto ni hora" ka root cause). Ab:
+    // release asset manual upload se NAYA ho to sync jeetega.
     if (!manual && cur && (!cur.source || cur.source === 'manual')) {
-      return { ok: true, skipped: true, ...base, reason: 'manual upload override hai — auto-sync ne nahi chhua' };
+      const relMs = Date.parse(asset.updated_at || '') || 0;
+      const upMs = Number(cur.uploadedAt) || 0;
+      if (upMs >= relMs) {
+        return { ok: true, skipped: true, ...base, reason: 'manual upload release se nayi hai — sync ne nahi chhua' };
+      }
     }
     const fresh = cur && cur.source === 'github' && cur.assetId === asset.id &&
       cur.assetUpdatedAt === asset.updated_at && cur.size === asset.size && fs.existsSync(APK_FILE);

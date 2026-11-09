@@ -91,6 +91,18 @@ object Store {
         get() = prefs.getLong("lastApkCheckAt", 0L)
         set(v) = prefs.edit().putLong("lastApkCheckAt", v).apply()
 
+    /** Aakhri checkAndInstall ka honest result ("up-to-date", "installing",
+     *  "screen off — postponed", "error: …"). Phone check isi se dikhata hai ki
+     *  auto-update atka kyun hai — andaza nahi, phone ka apna shabd. */
+    var lastUpdateStatus: String
+        get() = prefs.getString("lastUpdateStatus", "") ?: ""
+        set(v) = prefs.edit().putString("lastUpdateStatus", v).apply()
+
+    /** Wall-clock ms jab lastUpdateStatus likha gaya. */
+    var lastUpdateAt: Long
+        get() = prefs.getLong("lastUpdateAt", 0L)
+        set(v) = prefs.edit().putLong("lastUpdateAt", v).apply()
+
     /** Prefilled by the QR setup deep link (familyguard://pair?server=..&code=..).
      *  Cleared once pairing completes. */
     var pendingPairServer: String
