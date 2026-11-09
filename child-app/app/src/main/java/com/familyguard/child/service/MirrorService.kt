@@ -53,59 +53,115 @@ class MirrorService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            setupCapture(projection)
+            // Setup FAIL hua to projection LEAK na ho — pehle yahan exception par
+            // getMediaProjection se mili session kabhi stop nahi hoti thi aur
+            // cast icon FOREVER status bar par rehta tha.
+            val ok = runCatching { setupCapture(projection) }.getOrDefault(false)
+            if (!ok) {
+                runCatching { projection.stop() }
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            armIdleWatchdog()
         }
         return START_NOT_STICKY
     }
 
-    private fun setupCapture(projection: MediaProjection) {
-        runCatching {
-            val metrics = resources.displayMetrics
-            val maxSide = maxOf(metrics.widthPixels, metrics.heightPixels)
-            val scale = if (maxSide > 720) 720f / maxSide else 1f
-            val w = (metrics.widthPixels * scale).toInt().coerceAtLeast(1)
-            val h = (metrics.heightPixels * scale).toInt().coerceAtLeast(1)
-            // maxImages=4: Android 14/15 par 2-buffer ImageReader kabhi-kabhi
-            // stall ho jata tha (consumer ek frame slow hua to producer block,
-            // frames aana band — "cast icon on par screen nahi aayi").
-            val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 4)
-            val thread = HandlerThread("fg_mirror").apply { start() }
-            handlerThread = thread
-            val handler = Handler(thread.looper)
-            val vd = projection.createVirtualDisplay(
-                "fg_mirror", w, h, metrics.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                reader.surface, null, handler
-            )
-            reader.setOnImageAvailableListener({ r ->
-                r.acquireLatestImage()?.let { MirrorManager.onImage(it) }
-            }, handler)
-            projection.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    Store.pendingMirrorFps = -1
-                    notifyStreaming(false)
-                    MirrorManager.release()
-                    stopSelf()
-                }
-            }, handler)
-            MirrorManager.markActive(projection, reader, w, h, metrics.densityDpi, vd, handler)
-            // WS drop / session dead hone par MirrorManager khud release kare to
-            // service bhi stop ho — notification + FGS baki na rahe.
-            MirrorManager.onSessionDead = { runCatching { stopSelf() } }
-            // Projection MIL GAYI — in-flight consent state clear karo, warna
-            // smart suppression galat dikh rahi hogi (mirror off→on turant).
-            Store.projectionRequestedAt = 0L
-            // If the parent pressed "Start mirroring" while permission was missing
-            // (e.g. right after reboot), resume streaming automatically now that
-            // consent has been granted (auto-confirmed by accessibility).
-            if (Store.pendingMirrorFps > 0) {
-                MirrorManager.startStreaming(Store.pendingMirrorFps, Store.pendingMirrorQuality)
-                Store.pendingMirrorFps = -1
-                notifyStreaming(true)
-            }
-        }.onFailure {
-            stopSelf()
+    private fun setupCapture(projection: MediaProjection): Boolean {
+        val metrics = resources.displayMetrics
+        val maxSide = maxOf(metrics.widthPixels, metrics.heightPixels)
+        val scale = if (maxSide > 720) 720f / maxSide else 1f
+        val w = (metrics.widthPixels * scale).toInt().coerceAtLeast(1)
+        val h = (metrics.heightPixels * scale).toInt().coerceAtLeast(1)
+        // maxImages=4: Android 14/15 par 2-buffer ImageReader kabhi-kabhi
+        // stall ho jata tha (consumer ek frame slow hua to producer block,
+        // frames aana band — "cast icon on par screen nahi aayi").
+        val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 4)
+        val thread = HandlerThread("fg_mirror").apply { start() }
+        handlerThread = thread
+        val handler = Handler(thread.looper)
+        val vd = projection.createVirtualDisplay(
+            "fg_mirror", w, h, metrics.densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            reader.surface, null, handler
+        )
+        if (vd == null) {
+            runCatching { reader.close() }
+            thread.quitSafely()
+            handlerThread = null
+            return false
         }
+        reader.setOnImageAvailableListener({ r ->
+            r.acquireLatestImage()?.let { MirrorManager.onImage(it) }
+        }, handler)
+        projection.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                Store.pendingMirrorFps = -1
+                notifyStreaming(false)
+                MirrorManager.release()
+                stopSelf()
+            }
+        }, handler)
+        MirrorManager.markActive(projection, reader, w, h, metrics.densityDpi, vd, handler)
+        // WS drop / session dead hone par MirrorManager khud release kare to
+        // service bhi stop ho — notification + FGS baki na rahe.
+        MirrorManager.onSessionDead = { runCatching { stopSelf() } }
+        // Projection MIL GAYI — in-flight consent state clear karo, warna
+        // smart suppression galat dikh rahi hogi (mirror off→on turant).
+        Store.projectionRequestedAt = 0L
+        // If the parent pressed "Start mirroring" while permission was missing
+        // (e.g. right after reboot), resume streaming automatically now that
+        // consent has been granted (auto-confirmed by accessibility).
+        if (Store.pendingMirrorFps > 0) {
+            MirrorManager.startStreaming(Store.pendingMirrorFps, Store.pendingMirrorQuality)
+            Store.pendingMirrorFps = -1
+            notifyStreaming(true)
+        } else {
+            // CAST ICON PERMANENT KA ROOT CAUSE: koi stream pending NAHI hai
+            // (parent ne pehle hi stop daba diya / screenshot ya
+            // mirror_request_permission se consent aayi / consent late confirm
+            // hui) — to session IDLE zinda reh jati thi aur system ka cast
+            // icon KABHI nahi jata tha. Ab: screenshot capture window
+            // (pendingCaptureAt ~20 s) ke bahar session TURANT release —
+            // agle mirror_start par fresh consent (auto-confirm) 2-5 s me
+            // mil jati hai, isliye idle session rakhne ka koi fayda nahi.
+            val capturePending = Store.pendingCaptureAt > 0L &&
+                android.os.SystemClock.elapsedRealtime() - Store.pendingCaptureAt <= 20_000L
+            if (!capturePending) {
+                MirrorManager.release()
+                notifyStreaming(false)
+                stopSelf()
+            }
+        }
+        return true
+    }
+
+    /** SAFETY NET: har 5 s check — projection hai par na stream chal raha, na
+     *  koi mirror/screenshot pending, to session release + stopSelf. Kisi bhi
+     *  race (consent late confirm, stop pehle pahunch gaya) me cast icon
+     *  FOREVER atakne ka aakhri bandobast. */
+    private val idleHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun armIdleWatchdog() {
+        idleHandler.postDelayed({ idleCheck() }, 5_000L)
+    }
+
+    private fun idleCheck() {
+        if (!MirrorManager.hasProjection) {
+            stopSelf()
+            return
+        }
+        val busy = MirrorManager.isStreaming ||
+            Store.pendingMirrorFps > 0 ||
+            (Store.pendingCaptureAt > 0L &&
+                android.os.SystemClock.elapsedRealtime() - Store.pendingCaptureAt <= 20_000L)
+        if (busy) {
+            armIdleWatchdog()
+            return
+        }
+        MirrorManager.release()
+        notifyStreaming(false)
+        stopSelf()
     }
 
     override fun onDestroy() {

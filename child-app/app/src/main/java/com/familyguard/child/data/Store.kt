@@ -132,6 +132,13 @@ object Store {
     @Volatile
     var pendingMirrorQuality: Int = 60
 
+    /** SystemClock.elapsedRealtime() — screenshot command ne consent manga (capture
+     *  ke liye) aur agle ~20 s tak ek frame chahiye. MirrorService is window me
+     *  freshly-granted session ko turant release NAHI karta (warna screenshot
+     *  kabhi kaam nahi karta); window ke baad idle session khud mar jata hai. */
+    @Volatile
+    var pendingCaptureAt: Long = 0L
+
     /** One-tap auto-grant walkthrough: the wizard arms the step name + deadline and
      *  EnforcementService clicks the matching system dialogs/toggles while armed. */
     @Volatile

@@ -1351,8 +1351,8 @@ function renderLiveDiag() {
   const h = c.health || {};
   const issues = [];
   // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
-  if (typeof h.versionCode === "number" && h.versionCode < 3) {
-    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v3) — Android 14/15 mirror+mic+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  if (typeof h.versionCode === "number" && h.versionCode < 4) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v4) — Android 14/15 mirror+mic+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
   }
   if (h.accessibility === false) {
     issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");

