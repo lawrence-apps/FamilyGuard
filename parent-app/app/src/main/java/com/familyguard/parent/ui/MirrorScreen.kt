@@ -131,7 +131,7 @@ fun MirrorScreen(vm: MainViewModel) {
             )
         }
         Text(
-            "Cast sign sirf tab dikhta hai jab aap LIVE dekh rahe ho — Stop dabate hi ya screen se nikalte hi gayab. Consent popup Android ka rule hai (100% hat nahi sakta), lekin wo 1 second me khud confirm ho jata hai — child ko touch nahi karna padta.",
+            "Ek baar setup me consent khud confirm ho gaya tha — ab Start dabate hi screen turant aati hai, KOI POPUP NAHI (reboot ke baad bhi session khud wapas aa jata hai). Screen se nikalte hi streaming khud ruk jati hai. Cast sign child phone par ready-state me dikhta hai — ye Android ka privacy rule hai.",
             color = Color(0xFF9CA3AF),
             fontSize = 11.sp,
             textAlign = TextAlign.Center,

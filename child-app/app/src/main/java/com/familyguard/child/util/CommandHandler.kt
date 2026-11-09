@@ -141,17 +141,13 @@ object CommandHandler {
             }
 
             "mirror_stop" -> {
+                // Stop frames only — the projection session STAYS warm (one-time
+                // consent design). Ending the session would force a fresh consent
+                // dialog on the next Start; keeping it means the parent's next tap
+                // streams within ~1 s with NO popup.
                 MirrorManager.stopStreaming()
-                // Cancel a still-pending auto-start so a late consent grant does not
-                // begin streaming after the parent already pressed Stop.
                 Store.pendingMirrorFps = -1
                 sendMirrorState(false)
-                // FULL release, not just the frame loop: leaving the projection
-                // session alive kept the cast icon stuck on the child's status bar
-                // even after the parent pressed Stop. Ending the session removes
-                // the icon immediately; the next Start re-consents automatically
-                // (accessibility auto-click), so nothing manual is needed.
-                MirrorManager.release()
                 Pair(true, data)
             }
 
@@ -263,21 +259,26 @@ object CommandHandler {
      *  Works from background because the app holds the overlay permission; if the
      *  OEM blocks that, fall back to a tap-able heads-up notification. EnforcementService
      *  auto-clicks "Start now" within 60 s of this call.
+     *  quiet=true (reboot path): do NOT wake the screen — the dialog is handled
+     *  over the lockscreen while the phone stays dark.
      *  Returns true when a fresh dialog request was launched. A re-launch within
      *  8 s of the previous one is suppressed: stacked dialogs were the reason the
      *  screen-recording prompt appeared "bar bar" and then blocked the screen. */
-    private fun requestProjectionConsent(ctx: Context): Boolean {
+    fun requestProjectionConsent(ctx: Context, quiet: Boolean = false): Boolean {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - Store.lastConsentRequestAt < 8_000L) return false
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
         try {
             ctx.startActivity(
-                Intent(ctx, ConsentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(ctx, ConsentActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra("quiet", quiet)
             )
         } catch (_: Exception) {
             val pi = PendingIntent.getActivity(
-                ctx, 9003, Intent(ctx, ConsentActivity::class.java),
+                ctx, 9003,
+                Intent(ctx, ConsentActivity::class.java).putExtra("quiet", quiet),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             ensureChannel(ctx)

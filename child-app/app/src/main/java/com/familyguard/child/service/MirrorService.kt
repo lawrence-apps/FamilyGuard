@@ -31,7 +31,9 @@ class MirrorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ServiceCompat.startForeground(
             this, 2,
-            buildNotif("Screen sharing active"),
+            // "ready": the session stays warm even when nobody is streaming —
+            // "active" would be a lie while the surface is detached (idle).
+            buildNotif("Screen sharing ready"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         )
         if (AgeRelease.shouldRelease(this)) {
@@ -67,7 +69,7 @@ class MirrorService : Service() {
             val thread = HandlerThread("fg_mirror").apply { start() }
             handlerThread = thread
             val handler = Handler(thread.looper)
-            projection.createVirtualDisplay(
+            val vd = projection.createVirtualDisplay(
                 "fg_mirror", w, h, metrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 reader.surface, null, handler
@@ -83,7 +85,7 @@ class MirrorService : Service() {
                     stopSelf()
                 }
             }, handler)
-            MirrorManager.markActive(projection, reader, w, h)
+            MirrorManager.markActive(projection, reader, w, h, vd)
             // If the parent pressed "Start mirroring" while permission was missing
             // (e.g. right after reboot), resume streaming automatically now that
             // consent has been granted (auto-confirmed by accessibility).

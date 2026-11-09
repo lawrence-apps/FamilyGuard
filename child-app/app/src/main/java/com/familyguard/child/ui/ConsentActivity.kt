@@ -27,11 +27,13 @@ class ConsentActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Show even over the lock screen so a reboot + remote mirror request never
-        // needs the child to unlock the phone.
+        // needs the child to unlock the phone. quiet=true (boot re-establish) keeps
+        // the screen OFF — the dialog is handled invisibly while the phone stays dark.
+        val quiet = intent?.getBooleanExtra("quiet", false) ?: false
         if (Build.VERSION.SDK_INT >= 27) {
             runCatching {
                 setShowWhenLocked(true)
-                setTurnScreenOn(true)
+                if (!quiet) setTurnScreenOn(true)
             }
         }
         if (!Store.paired || Store.released || MirrorManager.hasProjection) {

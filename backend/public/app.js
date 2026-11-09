@@ -754,7 +754,7 @@ $("mirror-start").onclick = () => {
     S.lastFrameAt = Date.now();
     $("mirror-start").classList.add("hidden");
     $("mirror-stop").classList.remove("hidden");
-    mirrorStatus("Child par consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
+    mirrorStatus("Screen aa rahi hai… (consent session pehle se ready — sirf pehli dafa setup me khud confirm hota hai)", true);
   } else alert("Not connected");
 };
 $("mirror-stop").onclick = () => {
