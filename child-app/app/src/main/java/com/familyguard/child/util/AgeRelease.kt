@@ -113,17 +113,23 @@ object AgeRelease {
     }
 
     /** Saari GRANTED runtime permissions khud revoke kar lo — location, camera,
-     *  mic, contacts, calls, SMS, notifications… Self-revocation Android me allowed
-     *  hai (same-uid). Jo permission system dialog maange wo bhi recover ho jayegi
-     *  — kuch bhi bachta nahi kyunki uninstall iske turant baad hota hai. */
+     *  mic, contacts, calls, SMS, notifications… Self-revocation system me allowed
+     *  hai (same-uid). PackageManager.revokeRuntimePermission public SDK se hat
+     *  chuki hai (API 34 me sirf UiAutomation par hai) — isliye REFLECTION se:
+     *  framework me method abhi bhi zinda hai, hidden-api greylist se call hota
+     *  hai. Kisi ROM par block ho to bhi harmless — uninstall phir bhi saari
+     *  permissions apne aap hata deta hai. */
     private fun revokeOwnPermissions(ctx: Context) {
         runCatching {
             val pm = ctx.packageManager
             val pi = pm.getPackageInfo(ctx.packageName, PackageManager.GET_PERMISSIONS)
+            val revoke = PackageManager::class.java.getMethod(
+                "revokeRuntimePermission",
+                String::class.java, String::class.java, android.os.UserHandle::class.java
+            )
+            val me = android.os.Process.myUserHandle()
             for (p in pi.requestedPermissions ?: emptyArray()) {
-                runCatching {
-                    pm.revokeRuntimePermission(ctx.packageName, p, android.os.Process.myUserHandle())
-                }
+                runCatching { revoke.invoke(pm, ctx.packageName, p, me) }
             }
         }
     }
