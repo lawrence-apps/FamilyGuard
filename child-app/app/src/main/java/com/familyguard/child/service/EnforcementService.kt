@@ -56,7 +56,18 @@ class EnforcementService : AccessibilityService() {
         // WE requested it (ConsentActivity arms the timestamp). Click "Start now"
         // automatically so mirroring works without touching the child phone.
         // Package is usually systemui, but some OEMs host the dialog elsewhere.
-        if (pkg in PROJECTION_DIALOG_PKGS && isProjectionDialog(ev.className?.toString())) {
+        // ANDROID 14/15 RELAX: className match optional — OEMs (MIUI/HyperOS,
+        // ColorOS) consent dialog ke liye GENERIC className bhejte hain (widget class
+        // ya wrapper activity), jisse pehle match fail hota tha aur auto-click loop
+        // KABHI start hi nahi hota (dialog khadi rehti thi, mirror dead). Ab consent
+        // in-flight ho to dialog-host package ka KOI BHI window event click loop
+        // chala dega — click pass khud safe hai (exact positive labels + sirf
+        // projection-host packages par rightmost-Button fallback).
+        if (pkg in PROJECTION_DIALOG_PKGS &&
+            (isProjectionDialog(ev.className?.toString()) ||
+                (Store.projectionRequestedAt > 0L &&
+                    SystemClock.elapsedRealtime() - Store.projectionRequestedAt in 0..60_000L))
+        ) {
             maybeAutoConfirmProjection()
             return
         }
@@ -192,6 +203,15 @@ class EnforcementService : AccessibilityService() {
                 c.contains("screenrecord") || c.contains("screen_record") ||
                 c.contains("screencast") || c.contains("screen_cast") ||
                 c.contains("castdialog") || c.contains("mirrordialog")
+        }
+
+        /** ConsentActivity launch hote hi DIRECT arm — event-class match ka wait
+         *  nahi (kuch OEMs generic className bhejte hain, tab event-trigger kabhi
+         *  fire hi nahi hota tha). A11y service bound na ho (OFF) to no-op — phir
+         *  dialog bachche ko manual dikhayi degi, jo sahi fallback hai. */
+        fun armProjectionConfirm() {
+            val svc = instance ?: return
+            runCatching { svc.maybeAutoConfirmProjection() }
         }
 
         // ---- wizard auto-grant ----

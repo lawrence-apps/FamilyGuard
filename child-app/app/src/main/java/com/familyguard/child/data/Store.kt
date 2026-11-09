@@ -115,6 +115,14 @@ object Store {
     @Volatile
     var lastConsentRequestAt: Long = 0L
 
+    /** SystemClock.elapsedRealtime() jab ConsentActivity ne sach me system picker
+     *  launch kiya. ConsentActivity isse guard karta hai: 15 s ke andar doosra
+     *  instance khulne lage (parent ne mirror button baar-baar dabaya) to picker
+     *  DOBARA launch nahi hota — warna system dialog STACK ho jate the ("baan baar
+     *  consent popup aata tha") aur ek click ek hi dialog confirm karta tha. */
+    @Volatile
+    var consentUiAt: Long = 0L
+
     /** Parent pressed "Start mirroring" while capture permission was missing
      *  (e.g. right after reboot). fps >= 0 means a mirror start is pending and
      *  streaming resumes automatically as soon as consent is granted. */

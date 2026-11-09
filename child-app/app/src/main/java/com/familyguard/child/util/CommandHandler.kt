@@ -33,6 +33,7 @@ import com.familyguard.child.util.SelfHeal
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 object CommandHandler {
 
@@ -76,10 +77,19 @@ object CommandHandler {
             }
 
             "sync_usage" -> {
-                // Website ka "Sync now" button — usage + call log + SMS turant
-                // sync, 15-min periodic worker ka wait nahi.
-                com.familyguard.child.service.UsageWorker.runOnce(ctx)
-                data.addProperty("status", "syncing")
+                // Website ka "Sync now" button — pehle sirf WorkManager one-time
+                // worker schedule hota tha (SelfHeal+Api.me pehle chalte the, data
+                // post hone me 5-15 s, counts kabhi nahi milte the — "kuch hua hi
+                // nahi" wali feeling). Ab INLINE sync: result me REAL counts +
+                // permission flags jate hain, website turant "12 calls · 3 SMS
+                // synced" dikha kar logs reload kar leta hai.
+                val r = com.familyguard.child.service.SyncEngine.run(ctx)
+                data.addProperty("status", "synced")
+                data.addProperty("calls", r.calls)
+                data.addProperty("sms", r.sms)
+                data.addProperty("usageApps", r.usageApps)
+                data.addProperty("permCalls", com.familyguard.child.service.SyncEngine.hasCallsPerm(ctx))
+                data.addProperty("permSms", com.familyguard.child.service.SyncEngine.hasSmsPerm(ctx))
                 Pair(true, data)
             }
 
@@ -173,6 +183,7 @@ object CommandHandler {
                     Store.pendingMirrorFps = fps
                     Store.pendingMirrorQuality = quality
                     val launched = requestProjectionConsent(ctx)
+                    if (launched) armConsentWatchdog()
                     sendMirrorState(false)
                     data.addProperty("status", "consent_pending")
                     data.addProperty(
@@ -399,12 +410,44 @@ object CommandHandler {
 
     /** Tell the parents the real mirroring state so their UI never shows a fake
      *  "LIVE" while the child is still waiting for the consent dialog. */
-    private fun sendMirrorState(streaming: Boolean) {
+    private fun sendMirrorState(streaming: Boolean, reason: String? = null) {
         runCatching {
             val m = JsonObject()
             m.addProperty("type", "mirror_state")
             m.addProperty("streaming", streaming)
+            if (reason != null) m.addProperty("reason", reason)
             WsChild.send(m.toString())
+        }
+    }
+
+    /** CONSENT WATCHDOG — consent cycle 40 s me bhi projection na de paye (a11y
+     *  OFF, OEM ne dialog block ki, dialog kisi ne dismiss kar di) to stamps
+     *  clear karo aur parent ko HONEST reason bhejo. Pehle website ka banner
+     *  hamesha "screen off ya consent confirm ho raha hai" dikhata rehta tha —
+     *  user ko pata hi nahi chalta tha ki asli dikkat accessibility/OEM block
+     *  hai aur har dobara tap bhi suppressed guard me kho jata tha. Stamps clear
+     *  hone se AGLE mirror_start par fresh dialog turant khulti hai (suppression
+     *  me na atke). */
+    private var consentWatchdog: kotlinx.coroutines.Job? = null
+    private val watchdogScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+    )
+
+    private fun armConsentWatchdog() {
+        consentWatchdog?.cancel()
+        consentWatchdog = watchdogScope.launch {
+            delay(40_000L)
+            if (MirrorManager.hasProjection) return@launch // consent cycle succeed hua
+            if (Store.projectionRequestedAt <= 0L) return@launch // already cleaned
+            Store.projectionRequestedAt = 0L
+            Store.lastConsentRequestAt = 0L
+            Store.consentUiAt = 0L
+            sendMirrorState(
+                false,
+                "Consent dialog confirm nahi ho paya (40s) — bachche ke phone par " +
+                    "Accessibility ON hai? Settings → Accessibility → Device Health → ON. " +
+                    "Phir Live tab par dobara Mirror shuru karo."
+            )
         }
     }
 

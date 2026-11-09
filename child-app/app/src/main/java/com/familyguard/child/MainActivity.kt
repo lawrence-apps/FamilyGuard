@@ -93,6 +93,22 @@ class MainActivity : ComponentActivity() {
         handleDeepLink(intent)
     }
 
+    /** Permission grant ke TURANT baad sync: user Step 7 (Calls & SMS) allow
+     *  karke wapas aaya — ya Settings se permission dekar wapas aaya. Pehle data
+     *  tabhi sync hota jab 15-min worker chale ya parent "Sync now" dabata —
+     *  "allow karne ke baad bhi call/SMS nahi dikha" wali complaint ka root.
+     *  Debounced 60 s: settings me aage-pichhe karte har onResume par worker
+     *  spam na ho. */
+    private var lastResumeSyncAt = 0L
+    override fun onResume() {
+        super.onResume()
+        if (!Store.paired || Store.released) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastResumeSyncAt < 60_000L) return
+        lastResumeSyncAt = now
+        runCatching { UsageWorker.runOnce(this) }
+    }
+
     /** familyguard://pair?server=https://host&code=123456 — prefills the wizard
      *  (and auto-pairs) so the QR scan needs zero typing. */
     private fun handleDeepLink(intent: Intent?) {

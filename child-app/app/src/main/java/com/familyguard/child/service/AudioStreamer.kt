@@ -51,7 +51,22 @@ object AudioStreamer {
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                     maxOf(minBuf, CHUNK_BYTES * 4)
                 )
+                // Android 14/15: AudioRecord init FAIL ho sakta hai (mic HOG ke
+                // liye blocked, FGS mic-type na mila, OEM security). Pehle null
+                // rec par read() -1 deta rehta tha aur loop hamesha ke liye
+                // chupchap chalta rehta tha — website ko "streaming" dikhta tha
+                // par awaaz kabhi nahi aati. Ab honest error + turant band.
+                if (rec == null || rec!!.state != AudioRecord.STATE_INITIALIZED) {
+                    streaming = false
+                    sendState(false, "Mic open nahi hua (blocked) — child phone par Device Health app ek baar khol kar dobara Start karo")
+                    return@runCatching
+                }
                 rec?.startRecording()
+                if (rec?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                    streaming = false
+                    sendState(false, "Mic start nahi ho paya (system block) — child phone par app khol kar mic allow karo")
+                    return@runCatching
+                }
                 sendState(true)
                 val buf = ByteArray(CHUNK_BYTES)
                 var zeroChunks = 0

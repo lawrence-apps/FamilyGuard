@@ -162,7 +162,10 @@ function handleChildMessage(cid, msg, raw) {
     case 'mirror_state': {
       // Real mirroring state from the child device (streaming started/stopped,
       // consent granted/lost). Parents use it to show a truthful LIVE indicator.
-      broadcastToParents({ type: 'mirror_state', cid, streaming: !!msg.streaming });
+      // reason: consent fail / a11y off / OEM block ka honest message — website
+      // generic "consent confirm ho raha hai" ki jagah asli wajah dikhati hai.
+      const reason = typeof msg.reason === 'string' && msg.reason ? msg.reason : undefined;
+      broadcastToParents({ type: 'mirror_state', cid, streaming: !!msg.streaming, reason });
       break;
     }
     default:

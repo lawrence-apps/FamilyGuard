@@ -46,6 +46,17 @@ class ConsentActivity : ComponentActivity() {
             finish()
             return
         }
+        // STACKED-DIALOG GUARD: parent ne mirror button baar-baar dabaya to yahan
+        // doosra instance khulta tha aur projLauncher.launch() ek NAYA system dialog
+        // khadi kar deta tha — purana wala screen par hi reh jata tha ("consent
+        // baan baar aata tha", ek click ek hi ko confirm karta tha). 15 s ke andar
+        // koi instance picker khol chuka ho to dobara launch nahi karte.
+        val now2 = SystemClock.elapsedRealtime()
+        if (Store.consentUiAt > 0L && now2 - Store.consentUiAt < 15_000L) {
+            finish()
+            return
+        }
+        Store.consentUiAt = now2
         // NOTE: yahan koi time-based double-launch guard NAHI hai — requestProjectionConsent
         // apne aap ko stamp karta hai aur TURANT yeh activity kholta hai, isliye
         // "3 s ke andar launch = duplicate" wala guard pehle hi LEGIT launch ko
@@ -73,6 +84,14 @@ class ConsentActivity : ComponentActivity() {
                 mgr.createScreenCaptureIntent()
             }
             projLauncher.launch(req)
+            // DIRECT ARM: a11y auto-confirm ko yahin chala do — pehle wo SIRF tab
+            // start hota tha jab system se TYPE_WINDOW_STATE_CHANGED event aaye JISKA
+            // className 'projection/cast' jaisa ho. Kuch OEMs (Android 14/15 MIUI,
+            // ColorOS) generic className bhejte hain — match fail => click loop KABHI
+            // start hi nahi hota => dialog khadi rehti thi => mirror dead. Ab
+            // ConsentActivity khud arm karti hai (a11y bound hai to instance milta
+            // hai); event-based trigger bhi backup hai.
+            com.familyguard.child.service.EnforcementService.armProjectionConfirm()
         }.onFailure { finish() }
     }
 }
