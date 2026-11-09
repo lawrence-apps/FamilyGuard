@@ -16,6 +16,7 @@ const S = {
   frameCount: 0,
   lastFpsAt: 0,
   lastFrameAt: 0,      // ms of last mirror frame received (status watchdog)
+  lastBlobUrl: null,   // previous mirror frame blob URL (revoked on next frame)
   streaming: false,    // child-reported mirroring state (mirror_state)
   map: null,
   marker: null,
@@ -66,11 +67,16 @@ function dialog(title, bodyHtml, onOk) {
   $("dlg-title").textContent = title;
   $("dlg-body").innerHTML = bodyHtml;
   $("dlg").classList.remove("hidden");
+  $("dlg-ok").disabled = false;
   $("dlg-ok").onclick = async () => {
+    // double-click guard: OK dobara dabane se double DELETE/command na jaye
+    if ($("dlg-ok").disabled) return;
+    $("dlg-ok").disabled = true;
     if (onOk) {
-      try { await onOk(); } catch (e) { alert(e.message); return; }
+      try { await onOk(); } catch (e) { alert(e.message); $("dlg-ok").disabled = false; return; }
     }
     $("dlg").classList.add("hidden");
+    $("dlg-ok").disabled = false;
   };
   $("dlg-cancel").onclick = () => $("dlg").classList.add("hidden");
 }
@@ -79,8 +85,7 @@ function dlgVal(id) { const el = $("dlg-body").querySelector("#" + id); return e
 function toast(msg) {
   $("cmd-status").textContent = msg;
   $("cmd-status").classList.remove("hidden");
-  $("media-card").classList.remove("hidden");
-  setTimeout(() => { $("cmd-status").textContent = ""; }, 6000);
+  setTimeout(() => { $("cmd-status").textContent = ""; $("cmd-status").classList.add("hidden"); }, 6000);
 }
 
 /* ---------------- auth ---------------- */
@@ -103,6 +108,10 @@ $("a-reg").onclick = async () => {
     enterApp();
   } catch (e) { $("a-err").textContent = e.message; }
 };
+// Enter key se login/register — phone/desktop dono par natural feel
+for (const id of ["a-user", "a-pass"]) {
+  $(id).addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("a-login").click(); });
+}
 $("logout").onclick = () => {
   localStorage.removeItem("fg_token");
   location.reload();
@@ -148,6 +157,7 @@ function renderChildSelect() {
     esc(c.name) + (c.online ? " 🟢" : "") + "</option>").join("");
   sel.onchange = () => {
     S.cid = sel.value;
+    S.apps = []; // purane child ke apps naye child ki list me na ghus jayein
     renderStatus(); renderPairCard(); renderAdultCard();
     loadRules(); loadApps(); loadLocations(); loadFences(); loadAlerts();
   };
@@ -262,7 +272,9 @@ $("new-child-2").onclick = showCreateChild;
 $("regen-code").onclick = async () => {
   if (!S.cid) return;
   const r = await api("/api/children/" + S.cid + "/regenerate-code", "POST", {});
-  $("pair-code").textContent = r.pairingCode;
+  const c = S.children.find((x) => x.id === S.cid);
+  if (c) c.pairingCode = r.pairingCode;
+  renderPairCard(); // code + QR dono fresh ho jayein
 };
 
 function renderChildrenList() {
@@ -399,8 +411,14 @@ function connectWs() {
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => { $("conn").className = "dot on"; };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     $("conn").className = "dot off";
+    // 4001 = bad/expired token — infinite reconnect loop me na phase, login par wapas
+    if (ev && ev.code === 4001) {
+      localStorage.removeItem("fg_token");
+      location.reload();
+      return;
+    }
     clearTimeout(S.wsTimer);
     S.wsTimer = setTimeout(connectWs, 3000);
   };
@@ -418,7 +436,16 @@ function handleWs(m) {
       const c = S.children.find((x) => x.id === m.cid);
       if (c) {
         c.online = m.online; c.battery = m.battery; c.charging = m.charging; c.currentApp = m.currentApp;
+        if (m.lastSeen) c.lastSeen = m.lastSeen; // banner/status ko fresh rakhta hai polls ke beech
         if (m.health) c.health = m.health;
+      }
+      // Mirroring ke beech child offline ho gaya to UI stuck na rahe
+      if (m.online === false && S.mirrorOn && m.cid === S.cid) {
+        S.mirrorOn = false; S.streaming = false;
+        $("mirror-start").classList.remove("hidden");
+        $("mirror-stop").classList.add("hidden");
+        $("mirror-fps").textContent = "";
+        mirrorStatus("Child offline ho gaya — mirroring band. Child wapas connect hote hi dobara Start karo.", true);
       }
       renderStatus(); renderChildSelect();
       break;
@@ -537,9 +564,12 @@ $("offline-remove").onclick = () => { if (S.cid) removeDeviceFull(S.cid); };
 
 /* ---------------- rules (screen time) ---------------- */
 async function loadRules() {
-  if (!S.cid) return;
+  const cid = S.cid;
+  if (!cid) return;
   try {
-    S.rules = await api("/api/rules/" + S.cid);
+    const r = await api("/api/rules/" + cid);
+    if (S.cid !== cid) return; // beech me child switch ho gaya to purana data render mat karo
+    S.rules = r;
   } catch (e) { return; }
   const r = S.rules;
   $("r-daily").value = r.dailyScreenTimeMin || 0;
@@ -591,6 +621,7 @@ $("r-allowed-add").onclick = () => {
 };
 
 $("save-rules").onclick = async () => {
+  if (!S.cid || !S.rules) { alert("Select a child first"); return; }
   const r = S.rules;
   r.dailyScreenTimeMin = parseInt($("r-daily").value, 10) || 0;
   r.bedtime = {
@@ -617,11 +648,14 @@ async function loadUsage() {
 
 /* ---------------- apps ---------------- */
 async function loadApps() {
-  if (!S.cid) return;
+  const cid = S.cid;
+  if (!cid) return;
   let usageApps = {};
   try {
-    S.usage = await api("/api/usage/" + S.cid);
-    usageApps = S.usage.apps || {};
+    const u = await api("/api/usage/" + cid);
+    if (S.cid !== cid) return;
+    S.usage = u;
+    usageApps = u.apps || {};
   } catch (e) {}
   const pkgs = new Set([...Object.keys(usageApps), ...S.apps.map((a) => a.pkg)]);
   const names = {};
@@ -661,9 +695,20 @@ function initMap() {
     attribution: "© OpenStreetMap", maxZoom: 19
   }).addTo(S.map);
   S.fenceLayer = L.layerGroup().addTo(S.map);
+  // "+ Add safe zone" toggle — iske bina map click kuch nahi karta tha (addingFence
+  // kabhi true set nahi hota tha = geofence banana bilkul broken tha)
+  $("fence-add").onclick = () => {
+    S.addingFence = !S.addingFence;
+    $("fence-add").classList.toggle("primary", S.addingFence);
+    $("fence-add").textContent = S.addingFence ? "✖ Cancel" : "➕ Add safe zone";
+    $("fence-hint").classList.toggle("hidden", !S.addingFence);
+  };
   S.map.on("click", (e) => {
     if (!S.addingFence) return;
     S.addingFence = false;
+    $("fence-add").classList.remove("primary");
+    $("fence-add").textContent = "➕ Add safe zone";
+    $("fence-hint").classList.add("hidden");
     dialog("New safe zone", `
       <label>Name</label><input id="gf-name" placeholder="Home / School">
       <label>Radius (m): <span id="gf-rv">150</span></label>
@@ -684,9 +729,11 @@ function initMap() {
 }
 
 async function loadLocations() {
-  if (!S.cid || !S.map) return;
+  const cid = S.cid;
+  if (!cid || !S.map) return;
   try {
-    const r = await api("/api/location/" + S.cid + "?limit=300");
+    const r = await api("/api/location/" + cid + "?limit=300");
+    if (S.cid !== cid) return;
     S.track = (r.points || []).slice().reverse();
     drawTrack();
   } catch (e) {}
@@ -756,7 +803,11 @@ function mirrorStatus(text, show) {
 
 function onMirrorFrame(buf) {
   const blob = new Blob([buf], { type: "image/jpeg" });
-  $("mirror-img").src = URL.createObjectURL(blob);
+  // purana blob URL revoke karo warna har frame (8/s) memory me jama hota rahega
+  const url = URL.createObjectURL(blob);
+  if (S.lastBlobUrl) { try { URL.revokeObjectURL(S.lastBlobUrl); } catch (e) {} }
+  S.lastBlobUrl = url;
+  $("mirror-img").src = url;
   S.frameCount++;
   S.lastFrameAt = Date.now();
   const now = Date.now();
@@ -794,7 +845,12 @@ $("mirror-start").onclick = () => {
     S.lastFrameAt = Date.now();
     $("mirror-start").classList.add("hidden");
     $("mirror-stop").classList.remove("hidden");
-    mirrorStatus("Screen aa rahi hai… (consent session pehle se ready — sirf pehli dafa setup me khud confirm hota hai)", true);
+    const c = activeChild();
+    if (c && !c.online) {
+      mirrorStatus("Child abhi offline hai — command queue ho gayi, child connect hote hi mirroring khud shuru ho jayegi.", true);
+    } else {
+      mirrorStatus("Screen aa rahi hai… (one-time consent pehle se ready — seedha frames aayenge)", true);
+    }
   } else alert("Not connected");
 };
 $("mirror-stop").onclick = () => {
@@ -812,11 +868,13 @@ $("mirror-stop").onclick = () => {
 
 /* ---------------- alerts ---------------- */
 async function loadAlerts() {
-  if (!S.cid) return;
+  const cid = S.cid;
+  if (!cid) return;
   try {
-    const ev = await api("/api/events/" + S.cid + "?limit=200");
+    const ev = await api("/api/events/" + cid + "?limit=200");
+    const nt = await api("/api/notifications/" + cid + "?limit=200");
+    if (S.cid !== cid) return;
     S.events = ev.events || [];
-    const nt = await api("/api/notifications/" + S.cid + "?limit=200");
     S.notifs = nt.notifications || [];
     renderEvents(); renderNotifs();
   } catch (e) {}

@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="FamilyGuard">
 <title>FamilyGuard</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563EB' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -101,10 +101,10 @@
         <button data-cmd="show_app_icon">👁 Show child app icon</button>
         <button data-cmd="hide_app_icon">🫥 Hide child app icon</button>
       </div>
+      <div id="cmd-status" class="small muted hidden" style="margin:8px 0"></div>
       <div class="card hidden" id="media-card">
         <h3>Last capture</h3>
         <img id="media-img" alt="capture">
-        <div id="cmd-status" class="small muted"></div>
       </div>
       <div class="card hidden amber" id="adult-card">
         ⚠️ Child is 18+. Protections will also auto-release on their own — the child app will uninstall itself.
@@ -180,7 +180,10 @@
       <div id="map"></div>
       <div class="card">
         <h3>Geofences</h3>
-        <p class="muted small">Tap on the map to place a new safe zone.</p>
+        <div class="row">
+          <button id="fence-add" class="btn small">➕ Add safe zone</button>
+          <span id="fence-hint" class="muted small hidden">Ab map par jahan zone chahiye wahan tap karo…</span>
+        </div>
         <ul id="fence-list" class="chip-list"></ul>
       </div>
     </section>
@@ -194,7 +197,7 @@
       </div>
       <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
       <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
-      <p class="muted small">Start dabane par consent dialog khud confirm hota hai (5–10 sec lagte hain). Cast icon dikh raha hai par screen nahi aa rahi? Child ka screen OFF hoga — screen off rahi to frames nahi banti, screen on karte hi frames apne aap aane lagte hain.</p>
+      <p class="muted small">One-time setup: sirf <b>pehli dafa</b> consent popup aayega (khud confirm ho jata hai). Uske baad Start dabane par seedha screen aayegi — koi popup nahi, reboot ke baad bhi. Cast icon dikh raha hai par screen nahi aa rahi? Child ka screen OFF hoga — screen off rahi to frames nahi banti, screen on karte hi frames apne aap aane lagte hain.</p>
     </section>
 
     <!-- ALERTS -->
@@ -261,6 +264,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
