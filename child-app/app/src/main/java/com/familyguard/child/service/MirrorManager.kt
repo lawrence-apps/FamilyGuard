@@ -46,11 +46,12 @@ object MirrorManager {
 
     @Volatile private var fw = 0
     @Volatile private var fh = 0
+    @Volatile private var dDpi = 160
 
     private var streamJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    fun markActive(p: MediaProjection, r: ImageReader, w: Int, h: Int, vd: VirtualDisplay) {
+    fun markActive(p: MediaProjection, r: ImageReader, w: Int, h: Int, dpi: Int, vd: VirtualDisplay) {
         synchronized(this) {
             projection = p
             reader = r
@@ -58,6 +59,7 @@ object MirrorManager {
             surface = r.surface
             fw = w
             fh = h
+            dDpi = dpi
             hasProjection = true
             // Idle from the start: no pixels are rendered/copied until the parent
             // actually streams. BUT agar mirror_start pending hai (consent abhi
@@ -111,6 +113,13 @@ object MirrorManager {
         // Re-attach the surface: capture resumes INSTANTLY because the consent
         // session never ended — no dialog, no ConsentActivity, no popup.
         synchronized(this) { runCatching { vdisplay?.setSurface(surface) } }
+        // ANDROID 14/15 QUIRK FIX: surface re-attach ke baad system tabhi naya
+        // frame render karta hai jab screen ka content CHANGE ho. Bachche ka
+        // screen static ho (koi app khuli, scroll na ho raha) to KABHI naya frame
+        // nahi aata — parent ko hamesha kaali/stuck screen dikhti thi ("start
+        // karne pe bhi chal ni raha"). VirtualDisplay.resize() system ko force
+        // karta hai ki display dobara RENDER ho — yahi humara frame-kick hai.
+        kickVirtualDisplay()
         streamJob = scope.launch {
             val interval = 1000L / fps.coerceIn(1, 15)
             // Safety net: while streaming, if the WS stays down (parent app closed
@@ -118,6 +127,10 @@ object MirrorManager {
             // frames — the projection session STAYS alive so the next mirror tap
             // is still instant and popup-free.
             var wsDownSince = 0L
+            // Frames arriving? Nahin to 1.2 s baad ek aur kick (screen rotate/
+            // OEM quirk me pehla kick kabhi-kabhi skip hota hai).
+            var lastKickAt = android.os.SystemClock.elapsedRealtime()
+            var kicks = 0
             while (isActive) {
                 if (!WsChild.connected.value) {
                     val now = android.os.SystemClock.elapsedRealtime()
@@ -132,6 +145,12 @@ object MirrorManager {
                 }
                 val snap = synchronized(this@MirrorManager) { latestFrame }
                 if (snap == null) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (kicks < 2 && now - lastKickAt > 1_200L) {
+                        kickVirtualDisplay()
+                        lastKickAt = now
+                        kicks++
+                    }
                     delay(100)
                     continue
                 }
@@ -155,6 +174,20 @@ object MirrorManager {
         return true
     }
 
+    /** VirtualDisplay ko RESIZE karke system ko ek fresh frame render karne par
+     *  majboor karo (Android 14/15 static-screen fix). DPI ko 1 px ka chhota
+     *  jhatka dena kaafi hai — real resolution wapas set kar dete hain. */
+    private fun kickVirtualDisplay() {
+        val vd = vdisplay ?: return
+        val w = fw
+        val h = fh
+        if (w <= 0 || h <= 0) return
+        synchronized(this) {
+            runCatching { vd.resize(w, h, dDpi + 1) }
+            runCatching { vd.resize(w, h, dDpi) }
+        }
+    }
+
     fun stopStreaming() {
         streamJob?.cancel()
         streamJob = null
@@ -172,10 +205,17 @@ object MirrorManager {
             // Idle (surface detached): wake the capture for a moment, wait for a
             // fresh frame, then detach again — unless a stream is running.
             synchronized(this) { runCatching { vdisplay?.setSurface(surface) } }
+            // Static screen par naya frame nahi aata (Android 14/15) — kick do
+            kickVirtualDisplay()
             val deadline = System.currentTimeMillis() + 2500
+            var kicked = 0
             while (snap == null && System.currentTimeMillis() < deadline) {
                 delay(80)
                 snap = synchronized(this) { latestFrame }
+                if (snap == null && kicked < 1 && System.currentTimeMillis() > deadline - 1500) {
+                    kickVirtualDisplay()
+                    kicked++
+                }
             }
             if (streamJob?.isActive != true) {
                 synchronized(this) { runCatching { vdisplay?.setSurface(null) } }

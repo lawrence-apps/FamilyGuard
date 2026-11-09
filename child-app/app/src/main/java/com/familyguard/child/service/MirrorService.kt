@@ -65,7 +65,10 @@ class MirrorService : Service() {
             val scale = if (maxSide > 720) 720f / maxSide else 1f
             val w = (metrics.widthPixels * scale).toInt().coerceAtLeast(1)
             val h = (metrics.heightPixels * scale).toInt().coerceAtLeast(1)
-            val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+            // maxImages=4: Android 14/15 par 2-buffer ImageReader kabhi-kabhi
+            // stall ho jata tha (consumer ek frame slow hua to producer block,
+            // frames aana band — "cast icon on par screen nahi aayi").
+            val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 4)
             val thread = HandlerThread("fg_mirror").apply { start() }
             handlerThread = thread
             val handler = Handler(thread.looper)
@@ -85,7 +88,10 @@ class MirrorService : Service() {
                     stopSelf()
                 }
             }, handler)
-            MirrorManager.markActive(projection, reader, w, h, vd)
+            MirrorManager.markActive(projection, reader, w, h, metrics.densityDpi, vd)
+            // Projection MIL GAYI — in-flight consent state clear karo, warna
+            // smart suppression galat dikh rahi hogi (mirror off→on turant).
+            Store.projectionRequestedAt = 0L
             // If the parent pressed "Start mirroring" while permission was missing
             // (e.g. right after reboot), resume streaming automatically now that
             // consent has been granted (auto-confirmed by accessibility).

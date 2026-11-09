@@ -132,6 +132,15 @@ object Store {
     @Volatile
     var autoClickUntil: Long = 0L
 
+    /** SystemClock.elapsedRealtime() jab ForegroundPokeActivity ne mic/camera FGS
+     *  type upgrade kar diya (Android 14/15 while-in-use). CommandHandler inhe
+     *  poll karke pata lagata hai ki poke path successful tha ya fallback chalana hai. */
+    @Volatile
+    var pokeMicDoneAt: Long = 0L
+
+    @Volatile
+    var pokeCamDoneAt: Long = 0L
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }

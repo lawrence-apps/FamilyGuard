@@ -158,13 +158,22 @@ class EnforcementService : AccessibilityService() {
         private val POSITIVE_ACTIONS = setOf(
             "start now", "start", "start recording", "start casting",
             "start screen capture", "start screen sharing", "start sharing",
+            "start mirroring", "start screen recording", "start screencast",
             "share screen", "share entire screen", "share this screen", "share",
+            "share full screen", "share whole screen",
             "अभी शुरू करें", "शुरू करें", "अभी प्रारंभ करें", "प्रारंभ करें",
             "स्क्रीन साझा करें", "साझा करें", "शेयर करें"
         )
 
-        /** Android 14+ chooser: make sure the whole screen is the selected option. */
-        private val ENTIRE_SCREEN_LABELS = listOf("entire screen", "पूरी स्क्रीन", "पूरा स्क्रीन")
+        /** Android 14+ chooser: make sure the whole screen is the selected option.
+         *  Android 15 ka naya dialog alag-alag OEM par alag label use karta hai —
+         *  "one app active"/single-app mode select reh gaya to sirf HUMARI app
+         *  capture hoti thi (kaali screen + green box recording me). */
+        private val ENTIRE_SCREEN_LABELS = listOf(
+            "entire screen", "full screen", "whole screen", "entire display",
+            "share full screen", "share entire screen", "share whole screen",
+            "पूरी स्क्रीन", "पूरा स्क्रीन"
+        )
 
         private fun isProjectionDialog(className: String?): Boolean {
             if (className == null) return false

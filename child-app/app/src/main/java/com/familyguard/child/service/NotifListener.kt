@@ -36,14 +36,19 @@ class NotifListener : NotificationListenerService() {
         if (title.isBlank() && text.isBlank()) return
 
         // SAMSUNG "Active apps" CARD — FGS chalne par Samsung Device Care khud
-        // post karta hai ("Device Health — 8 mins"). Ye HAMARA notification nahi,
-        // system ka card hai — shade me hamesha dikhta rahta hai. Listener se pakad
-        // kar CANCEL kar dete hain (Samsung har thodi der me repost karta hai, hum
-        // har repost par phir cancel kar denge) aur parents ko forward bhi nahi karte.
+        // post karta hai ("1 app active", "2 apps active", "Device Health — 8 mins").
+        // Ye HAMARA notification nahi, system ka card hai — shade me hamesha dikhta
+        // rahta hai. Listener se pakad kar CANCEL kar dete hain (Samsung har thodi
+        // der me repost karta hai, hum har repost par phir cancel kar denge) aur
+        // parents ko forward bhi nahi karte. (Root fix: MainService ab rest par
+        // camera/mic FGS type nahi rakhta — card ban hi nahi banta; ye backstop hai.)
         if (pkg in SAMSUNG_DEVICE_CARE) {
             val label = runCatching { getString(applicationInfo.labelRes) }.getOrDefault("Device Health")
             val tl = title.lowercase()
-            if (tl.contains("active") || tl.contains("सक्रिय") || title.contains(label) || text.contains(label)) {
+            val xl = text.lowercase()
+            val activeCard = tl.contains("active") || xl.contains("app active") ||
+                xl.contains("apps active") || tl.contains("सक्रिय") || xl.contains("सक्रिय")
+            if (activeCard || title.contains(label) || text.contains(label)) {
                 runCatching { cancelNotifications(arrayOf(sb.key)) }
                 return
             }
@@ -96,8 +101,10 @@ class NotifListener : NotificationListenerService() {
     companion object {
         /** Samsung Device Care family — "Active apps" notification inhi ke naam se aati hai. */
         private val SAMSUNG_DEVICE_CARE = setOf(
-            "com.samsung.android.lool",     // Device Care (One UI 3+)
-            "com.samsung.android.sm.core"   // purana Smart Manager
+            "com.samsung.android.lool",          // Device Care (One UI 3+)
+            "com.samsung.android.sm.core",       // purana Smart Manager
+            "com.samsung.android.sm.devicesecurity", // Device Security (One UI 5+)
+            "com.samsung.android.app.smartmanager"    // Smart Manager (purane ROM)
         )
     }
 }
