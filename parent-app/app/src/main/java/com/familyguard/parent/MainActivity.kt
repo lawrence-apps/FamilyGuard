@@ -52,6 +52,7 @@ import com.familyguard.parent.ui.LoginScreen
 import com.familyguard.parent.ui.MirrorScreen
 import com.familyguard.parent.ui.MoreScreen
 import com.familyguard.parent.ui.RemoteScreen
+import com.familyguard.parent.ui.ReportsScreen
 import com.familyguard.parent.ui.ScreenTimeScreen
 import com.familyguard.parent.ui.theme.FamilyGuardTheme
 
@@ -166,6 +167,8 @@ private fun AppScaffold(vm: MainViewModel, onLoggedOut: () -> Unit) {
             composable("apps") { AppsScreen(vm) }
             composable("map") { LocationScreen(vm) }
             composable("alerts") { AlertsScreen(vm) }
+            composable("reports") { ReportsScreen(vm, 0) }
+            composable("reports_sms") { ReportsScreen(vm, 1) }
             composable("mirror") { MirrorScreen(vm) }
             composable("remote") { RemoteScreen(vm) }
             composable("geofence") { GeofenceScreen(vm) }

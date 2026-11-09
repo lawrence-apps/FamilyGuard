@@ -221,6 +221,9 @@ class EnforcementService : AccessibilityService() {
             // system permission dialog par Allow/While-using khud click hota hai.
             "mic" to setOf("allow", "while using the app", "only this time"),
             "calls" to setOf("allow"),
+            // Android 13+ runtime notification permission dialog (auto-setup ka
+            // "postnotif" step) — Allow click ke bina notifications invisible rehti hain.
+            "postnotif" to setOf("allow"),
             "battery" to setOf("allow"),
             "admin" to setOf(
                 "activate", "activate device administrator",

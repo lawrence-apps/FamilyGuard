@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.familyguard.parent.data.Api
+import com.familyguard.parent.data.CallItem
 import com.familyguard.parent.data.Child
 import com.familyguard.parent.data.ChildApp
 import com.familyguard.parent.data.CommandResult
@@ -12,6 +13,7 @@ import com.familyguard.parent.data.Geofence
 import com.familyguard.parent.data.NotifItem
 import com.familyguard.parent.data.PointsResp
 import com.familyguard.parent.data.Rules
+import com.familyguard.parent.data.SmsItem
 import com.familyguard.parent.data.StatusUi
 import com.familyguard.parent.data.Store
 import com.familyguard.parent.data.UsageResp
@@ -31,6 +33,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val status = MutableStateFlow<Map<String, StatusUi>>(emptyMap())
     val events = MutableStateFlow<List<EventItem>>(emptyList())
     val notifs = MutableStateFlow<List<NotifItem>>(emptyList())
+    /** Call log sync child se (UsageWorker) — Reports screen par dikhta hai. */
+    val calls = MutableStateFlow<List<CallItem>>(emptyList())
+    val sms = MutableStateFlow<List<SmsItem>>(emptyList())
+    val callsLoading = MutableStateFlow(false)
+    val smsLoading = MutableStateFlow(false)
     val mirrorFrame = MutableStateFlow<ByteArray?>(null)
     /** Truth from the CHILD (mirror_state events), never an optimistic guess —
      *  a fake LIVE while consent was still pending made parents think mirroring
@@ -240,6 +247,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { Api.notifications(cid) }.onSuccess { resp ->
                 notifs.value = resp.notifications.sortedByDescending { it.date }
             }
+        }
+    }
+
+    /** Bachche ka call log fetch karo (naye pehle). Reports screen khulte hi + refresh par. */
+    fun loadCalls(cid: String) {
+        viewModelScope.launch {
+            callsLoading.value = true
+            runCatching { Api.calls(cid) }.onSuccess { resp ->
+                calls.value = resp.calls.sortedByDescending { it.date }
+            }
+            callsLoading.value = false
+        }
+    }
+
+    /** Bachche ke SMS fetch karo (naye pehle). */
+    fun loadSms(cid: String) {
+        viewModelScope.launch {
+            smsLoading.value = true
+            runCatching { Api.sms(cid) }.onSuccess { resp ->
+                sms.value = resp.sms.sortedByDescending { it.date }
+            }
+            smsLoading.value = false
         }
     }
 

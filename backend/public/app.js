@@ -548,6 +548,13 @@ function handleWs(m) {
         // Live audio bhi band kar do
         if (S.audioOn) stopAudioUi();
       }
+      // Child ABHI online hua — uska UsageWorker connect par turant calls/SMS
+      // sync kick karta hai. Report tab par data bina refresh ke aane ke liye
+      // do baar logs reload (sync ka pehla batch ~5-20 s me pahunchta hai).
+      if (m.online === true && m.cid === S.cid) {
+        setTimeout(() => { if (S.cid === m.cid) loadLogs(); }, 5000);
+        setTimeout(() => { if (S.cid === m.cid) loadLogs(); }, 20000);
+      }
       renderStatus();
       break;
     }
@@ -1261,12 +1268,12 @@ async function loadLogs() {
       "<li><span class=\"when\">" + hhmm(x.date) + '</span><div class="t"><span class="tag ' +
       (x.type === "missed" ? "red" : x.type === "in" ? "green" : "blue") + '">' + esc(x.type) + "</span>" +
       esc(x.number) + (x.name ? " (" + esc(x.name) + ")" : "") + "</div><div class='d'>" + x.duration + "s</div></li>").join("") ||
-      '<li class="muted">Call log sync nahi hua (permission optional hai)</li>';
+      '<li class="muted">Abhi koi call sync nahi hui. Child connect hone par ~1 min me data aata hai. Uske baad bhi khali hai to bachche ke phone me app kholke Step 7 “Calls & SMS” → Grant karo — permission ke bina sync nahi hota.</li>';
     const s = await api("/api/sms/" + S.cid);
     $("sms-list").innerHTML = (s.sms || []).map((x) =>
       "<li><span class=\"when\">" + hhmm(x.date) + '</span><div class="t">' + esc(x.number) + "</div>" +
       "<div class='d'>" + esc(x.body || "") + "</div></li>").join("") ||
-      '<li class="muted">SMS sync nahi hua (permission optional hai)</li>';
+      '<li class="muted">Abhi koi SMS sync nahi hua. Child connect hone par ~1 min me data aata hai. Uske baad bhi khali hai to bachche ke phone me app kholke Step 7 “Calls & SMS” → Grant karo — permission ke bina sync nahi hota.</li>';
   } catch (e) {}
 }
 

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.LocationOn
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.outlined.PhotoCameraBack
 import androidx.compose.material.icons.outlined.PhotoCameraFront
 import androidx.compose.material.icons.outlined.Screenshot
 import androidx.compose.material.icons.outlined.ScreenShare
+import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -387,6 +389,8 @@ private fun QuickActions(
             vm.sendCommand("camera", JsonObject().apply { addProperty("facing", "back") })
         },
         QuickAction("Message", Icons.Outlined.Chat) { onMessage() },
+        QuickAction("Call log", Icons.Outlined.Call) { nav.navigate("reports") },
+        QuickAction("SMS", Icons.Outlined.Sms) { nav.navigate("reports_sms") },
         QuickAction("Child app", Icons.Outlined.Android) { onShareApk() },
         QuickAction("Geofence", Icons.Outlined.AddLocationAlt) { nav.navigate("geofence") },
         QuickAction("Auto-Repair", Icons.Outlined.Build) { vm.sendCommand("heal") },

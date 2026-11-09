@@ -52,6 +52,7 @@ object WsChild {
             backoff = 3000L
             lastPongAt = SystemClock.elapsedRealtime()
             startPinger()
+            kickDataSync()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -190,6 +191,18 @@ object WsChild {
                 }
             }
         }
+    }
+
+    /** Connect hone par calls/SMS/usage turant sync — 15-min WorkManager periodic ka
+     *  wait nahi. Warna parent ko connect ke turant baad call log/SMS "option nahi
+     *  aaya" jaisa lagta hai (data aane me 15 min lagte the). Debounced: rapid
+     *  reconnects (network switch) par har baar worker nahi chalate. */
+    @Volatile private var lastDataKickAt = 0L
+    private fun kickDataSync() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDataKickAt < 60_000L) return
+        lastDataKickAt = now
+        runCatching { UsageWorker.runOnce(Graph.app) }
     }
 
     private fun stopPinger() {

