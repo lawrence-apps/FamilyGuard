@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#16A34A">
 <title>BachaGuard — Bachche ke phone ka control</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23DC2626' d='M12 2 4 5v6c0 5.25 3.4 10.74 8 12 4.6-1.26 8-6.75 8-12V5l-8-3z'/%3E%3Ccircle fill='%23F1F5F9' cx='12' cy='10' r='3'/%3E%3Cpath fill='%23F1F5F9' d='M8 16c0-2.2 1.8-4 4-4s4 1.8 4 4v1H8z'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -180,6 +180,18 @@
         <div id="audio-viz" class="audio-viz hidden"><span></span><span></span><span></span><span></span><span></span></div>
         <p class="muted small">Bachche ke phone ka mic live sunno — jaise hi Start dabate ho, awaaz aane lagti hai. Mic permission one-time setup me khud grant ho jati hai.</p>
       </div>
+      <div class="card">
+        <h3>🖼️ Gallery</h3>
+        <div class="row">
+          <button id="gallery-load" class="btn primary">📸 Gallery kholo</button>
+        </div>
+        <p id="gallery-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
+        <div id="gallery-grid" class="gallery-grid"></div>
+        <div class="row hidden" id="gallery-more-row" style="margin-top:8px">
+          <button id="gallery-more" class="btn">⬇ Aur dikhao</button>
+        </div>
+        <p class="muted small">Bachche ke phone ki latest photos/videos — thumbnails uske phone se live upload hote hain. Kisi photo par tap = bada view. Gallery permission pehli baar auto-Allow ho jati hai.</p>
+      </div>
     </section>
 
     <!-- MAP -->
@@ -341,6 +353,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

