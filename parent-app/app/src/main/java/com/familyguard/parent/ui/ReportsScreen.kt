@@ -273,10 +273,3 @@ private fun callColor(type: String): Color = when (type) {
     "missed" -> Color(0xFFDC2626)
     else -> Color(0xFF16A34A)
 }
-
-private fun prettyType(type: String) = when (type) {
-    "in" -> "Incoming"
-    "out" -> "Outgoing"
-    "missed" -> "Missed"
-    else -> "Call"
-}
