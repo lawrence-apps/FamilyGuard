@@ -18,7 +18,7 @@ const DEFAULTS = {
   sms: {},          // cid -> [sms]
   notifications: {},// cid -> [notifs]
   commandQueue: {}, // cid -> [commands]
-  media: []
+  media: {}         // cid -> [media items]
 };
 
 let db = null;
@@ -72,6 +72,7 @@ function purgeChild(cid) {
   delete db.sms[cid];
   delete db.notifications[cid];
   delete db.commandQueue[cid];
+  if (db.media && typeof db.media === 'object') delete db.media[cid];
   db.children = db.children.filter(c => c.id !== cid);
 }
 

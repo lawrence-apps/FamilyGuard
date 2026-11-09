@@ -102,7 +102,7 @@ Actions:
 - `POST /api/apk/sync` → backend GitHub release `latest` se child APK fetch karta hai (`GITHUB_REPO` + `GITHUB_TOKEN` env). `{...status, sync:{ok, tag, size}|{ok:false, reason}}`. Startup par + har 10 min background me bhi chalta hai; share token sync me same rehta hai.
 - `POST /api/apk` multipart field `file` (.apk, max 150 MB) → same status object. Manual override — background auto-sync isko replace nahi karta (Sync now se GitHub build wapas). Token rotate hota hai.
 - `DELETE /api/apk` → `{ok:true}` (removes APK + link)
-- `GET /apk/child?t=<token>` (public, token required) → browsers get an install landing page; `?dl=1` or non-HTML clients get the APK stream (`application/vnd.android.package-archive`). Files persist in `DATA_DIR/apk/` (survives redeploys with the `/app/data` volume).
+- `GET /apk/child?t=<token>` (public, token required) → browsers get an install landing page; `?dl=1` or non-HTML clients get the APK stream (`application/vnd.android.package-archive`). Files persist in `DATA_DIR/apk/` (survives redeploys with the `/app/data` volume). Add `&c=<pairing code>` (the `/s/:code` setup page does this automatically) to also show the green "App kholo & auto-setup" deep-link button on the landing page.
 
 ### Misc
 - `GET /health` → `{ok:true, ...}`
@@ -120,6 +120,7 @@ Actions:
 - `{type:"location", lat, lng, accuracy, speed, battery}` → stored + pushed to parents
 - `{type:"notification", pkg, title, text, date}` → stored + pushed to parents
 - `{type:"event", type:"geofence_enter", data:{}}` → stored + pushed to parents
+- `{type:"geofence_enter"|"geofence_exit", data:{fence, name}}` → same handling (GeofenceChecker sends the event type as msg.type directly); both forms are accepted
 - `{type:"command_result", id, ok:true, data:{}}` → pushed to parents
 - `{type:"apps", apps:[{pkg,name}]}` → stored + pushed to parents
 - `{type:"ping"}` → replies `{type:"pong"}`

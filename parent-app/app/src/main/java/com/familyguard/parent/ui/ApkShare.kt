@@ -112,7 +112,7 @@ fun ApkShareContent() {
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                "${info.fileName} • ${info.size / (1024 * 1024)} MB",
+                "${info.fileName} • " + String.format(java.util.Locale.US, "%.1f", info.size / 1048576.0) + " MB",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -150,7 +150,8 @@ The child app repairs itself automatically; the parent only sees status and can 
 | Breakage | Automatic fix (no phone touch) |
 |---|---|
 | Foreground service killed (system / swipe away / crash) | `onDestroy` schedules an exact-alarm restart after 3 s; the 15-min watchdog also revives it |
-| Phone rebooted | `BOOT_COMPLETED` receiver starts service + sync worker |
+| Phone rebooted | `BOOT_COMPLETED` (+ `QUICKBOOT_POWERON`) receiver starts service + sync worker |
+| App updated (GitHub auto-sync pushed a new APK) | `MY_PACKAGE_REPLACED` receiver restarts the service + sync worker instantly — no reboot needed |
 | WebSocket dropped | Exponential-backoff reconnect (3 s → 60 s) + 25 s ping keep-alive |
 | WorkManager job cancelled | Re-scheduled on every watchdog cycle |
 | Accessibility turned off | Full-screen notification on the child device that opens Accessibility Settings; `accessibility_disabled` event to parent |

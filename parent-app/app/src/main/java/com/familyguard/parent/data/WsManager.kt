@@ -59,6 +59,10 @@ class WsManager {
         val token = Store.token
         if (token.isEmpty()) return
         wantConnected = true
+        // A pending reconnect would create a SECOND socket if we connect now —
+        // cancel it so there is always at most one live parent socket.
+        reconnectJob?.cancel()
+        reconnectJob = null
         val request = buildRequest(token)
         if (request == null) {
             scheduleReconnect()
@@ -176,7 +180,8 @@ class WsManager {
                 events.tryEmit(WsEvent.Apps(cid, list))
             }
             "pairing" -> events.tryEmit(WsEvent.Pairing(cid))
-            "ping" -> events.tryEmit(WsEvent.Pong)
+            // server answers our app-level ping with "pong" ("ping" here is defensive)
+            "ping", "pong" -> events.tryEmit(WsEvent.Pong)
         }
     }
 

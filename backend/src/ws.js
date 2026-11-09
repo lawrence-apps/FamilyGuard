@@ -102,8 +102,14 @@ function handleChildMessage(cid, msg, raw) {
       storeNotification(cid, { pkg: msg.pkg || '', title: msg.title || '', text: msg.text || '', date: msg.date || Date.now() });
       break;
     }
-    case 'event': {
-      storeEvent(cid, { id: require('./auth').rid(), type: msg.type || 'unknown', data: msg.data || {}, t: msg.t || Date.now() });
+    case 'event':
+    // GeofenceChecker sends the event type directly as msg.type over WS
+    // (e.g. "geofence_enter" / "geofence_exit") — without these cases the
+    // messages hit default and were silently dropped (no live parent alert).
+    case 'geofence_enter':
+    case 'geofence_exit': {
+      const type = msg.type === 'event' ? (msg.eventType || 'unknown') : msg.type;
+      storeEvent(cid, { id: require('./auth').rid(), type, data: msg.data || {}, t: msg.t || Date.now() });
       break;
     }
     case 'command_result': {

@@ -635,6 +635,20 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Deep link can also arrive via onNewIntent AFTER this screen was already
+        // composed (green web button tapped while the wizard was open) — remember{}
+        // state wouldn't refresh by itself, so poll for pending values while the
+        // code field is still blank and pick them up.
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(500)
+                if (!autoTried && code.isBlank() && Store.pendingPairCode.isNotBlank()) {
+                    code = Store.pendingPairCode.filter { it.isDigit() }.take(6)
+                    if (Store.pendingPairServer.isNotBlank()) url = Store.pendingPairServer
+                }
+            }
+        }
+
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Step 1 · Pair with FamilyGuard", style = MaterialTheme.typography.titleSmall)
