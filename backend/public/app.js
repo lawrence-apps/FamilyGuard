@@ -307,7 +307,24 @@ function renderVersionBanner() {
   if (!el) return;
   const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
   if (!c || !c.paired || vc === null || vc >= LATEST_VC) { el.classList.add("hidden"); return; }
-  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest " + LATEST_VC + " = v" + LATEST_V + ") — isliye <b>Gallery, Mirror aur Phone-check nahi chal rahe</b>: ye sab naye build me hi hain. Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min).";
+  // Aakhri update try ka HONEST status (server persist karta hai) — toast miss
+  // ho jaye ya user na dekhe ho to bhi pata chalta hai update atka KAHAN hai.
+  let lastTry = "";
+  const lur = c.lastUpdateResult;
+  if (lur && lur.status && Date.now() - (lur.t || 0) < 86400000) {
+    const uMap = {
+      "busy": "⏳ Update pehle se chal raha hai — 2 min ruko",
+      "installing": "📥 APK download ho gayi — install dialog aa raha hai, screen ON rakho",
+      "up-to-date": "❗ Phone kehta hai 'up-to-date' — server par PURANI APK hai, Set tab → 🔄 Sync now dabao",
+      "screen off — postponed": "📵 Screen OFF thi isliye ruk gaya — screen ON rakho, 5 min me khud hoga",
+      "already latest": "❗ Phone kehta hai 'already latest' — server ka APK purana hai, Set tab → 🔄 Sync now",
+      "no apk on server": "❗ Server par APK nahi — Set tab → 🔄 Sync now dabao",
+      "download failed": "⚠️ Download fail — bachche ke phone ka net check karo"
+    };
+    const human = Object.keys(uMap).find((k) => lur.status.indexOf(k) === 0);
+    lastTry = "<div style=\"margin-top:8px;padding:6px 10px;background:#FFF;border-radius:8px;border:1px solid #FCA5A5\">📋 <b>Aakhri update try (" + timeAgoHi(lur.t) + "):</b> " + (human ? uMap[human] : esc(lur.status)) + "</div>";
+  }
+  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest " + LATEST_VC + " = v" + LATEST_V + ") — isliye <b>Gallery, Mirror aur Phone-check nahi chal rahe</b>: ye sab naye build me hi hain. Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min)." + lastTry;
   el.classList.remove("hidden");
 }
 $("oldver-update").onclick = () => {
@@ -733,6 +750,12 @@ function handleWs(m) {
           mirrorStatus("", false);
         }
       }
+      break;
+    }
+    case "update_result": {
+      // update_apk ka honest result — child record par save + banner refresh
+      const uc = S.children.find((x) => x.id === m.cid);
+      if (uc) { uc.lastUpdateResult = { ok: m.ok, status: m.status || "", t: m.t || Date.now() }; renderVersionBanner(); }
       break;
     }
     case "ring_state": {

@@ -285,10 +285,13 @@ class EnforcementService : AccessibilityService() {
                 "确定", "卸载", "仍然卸载"
             ),
             // Silent self-update: child app naya APK install karta hai — system
-            // install confirm par khud "Install" click ho jata hai.
+            // install confirm par khud "Install" click ho jata hai. MIUI/ColorOS
+            // apne beech me "Continue" screen bhi dikhaate hain — wahi bhi
+            // cover karo (dialog linkUpdateReceiver se khulta hai).
             "install" to setOf(
-                "install", "install anyway", "इंस्टॉल करें", "इंस्टॉल करें।",
-                "安装", "仍然安装"
+                "install", "install anyway", "continue", "continue install",
+                "इंस्टॉल करें", "इंस्टॉल करें।", "जारी रखें",
+                "安装", "仍然安装", "继续安装"
             )
         )
     }

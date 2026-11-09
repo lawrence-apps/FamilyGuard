@@ -50,7 +50,9 @@ function publicChild(c) {
     deviceName: c.deviceName || '', model: c.model || '', currentApp: c.currentApp || '',
     // Call/SMS permission flags — website Report tab par exact diag ke liye
     permCalls: !!c.permCalls, permSms: !!c.permSms,
-    health: c.health || null
+    health: c.health || null,
+    // Aakhri update_apk ka honest result (ws.js command_result se)
+    lastUpdateResult: c.lastUpdateResult || null
   };
 }
 
@@ -93,6 +95,11 @@ function storeEvent(cid, ev) {
   broadcastToParents({ type: 'event', cid, event: ev });
 }
 
+// update_apk command ids — result aane par child record par persist hota hai.
+// markUpdateCommand server.js POST /api/commands se call hota hai.
+const pendingUpdateCmds = new Set();
+function markUpdateCommand(id) { if (id) pendingUpdateCmds.add(String(id)); }
+
 function handleChildMessage(cid, msg, raw) {
   const c = db().children.find(x => x.id === cid);
   if (!c) return;
@@ -130,6 +137,16 @@ function handleChildMessage(cid, msg, raw) {
       break;
     }
     case 'command_result': {
+      // update_apk ke result ko CHILD RECORD par persist karo — parent ne toast
+      // miss kiya ho to bhi website banner par "aakhri update try" ka honest
+      // status hamesha dikhe (screen off / install permission / installing …).
+      if (pendingUpdateCmds.has(msg.id)) {
+        pendingUpdateCmds.delete(msg.id);
+        const st = (msg.data && (msg.data.status || msg.data.error)) || '';
+        c.lastUpdateResult = { ok: !!msg.ok, status: String(st), t: Date.now() };
+        store.save();
+        broadcastToParents({ type: 'update_result', cid, ok: c.lastUpdateResult.ok, status: c.lastUpdateResult.status, t: c.lastUpdateResult.t });
+      }
       broadcastToParents({ type: 'command_result', cid, id: msg.id, ok: !!msg.ok, data: msg.data || {} });
       break;
     }
@@ -320,4 +337,4 @@ function attach(server) {
   wss.on('close', () => clearInterval(interval));
 }
 
-module.exports = { attach, isOnline, sendToChild, closeChild, broadcastToParents, publicChild, defaultRules, storeLocation, storeNotification, storeEvent, handleChildMessage };
+module.exports = { attach, isOnline, sendToChild, closeChild, broadcastToParents, publicChild, defaultRules, storeLocation, storeNotification, storeEvent, handleChildMessage, markUpdateCommand };

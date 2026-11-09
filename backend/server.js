@@ -326,6 +326,9 @@ app.post('/api/commands', auth, parentOnly, (req, res) => {
   const c = db.children.find(x => x.id === cid);
   if (!c) return res.status(404).json({ error: 'child not found' });
   const cmd = { id: rid(), cid, action, params: params || {}, t: Date.now() };
+  // update_apk ke results child record par persist hote hain (ws.js) — banner
+  // "aakhri update try" isi se dikhta hai.
+  if (action === 'update_apk') wsHub.markUpdateCommand(cmd.id);
   if (!wsHub.sendToChild(cid, { type: 'command', id: cmd.id, action, params: cmd.params })) {
     if (!db.commandQueue[cid]) db.commandQueue[cid] = [];
     db.commandQueue[cid].push({ id: cmd.id, action, params: cmd.params });
