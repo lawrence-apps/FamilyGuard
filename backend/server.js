@@ -11,6 +11,7 @@ const bcrypt = require('bcryptjs');
 const store = require('./src/store');
 const { sign, verify, auth, parentOnly, childOrParent, childOnly, rid, code6 } = require('./src/auth');
 const wsHub = require('./src/ws');
+const tg = require('./src/telegram');
 
 store.load();
 const db = store.db;
@@ -107,6 +108,7 @@ app.delete('/api/children/:id', auth, parentOnly, (req, res) => {
     // uninstall dialog turant. (Web/parent app khud bhi bhejte hain, par yahan
     // bhejna guarantee karta hai ki koi bhi client se delete par child saaf ho.)
     wsHub.sendToChild(cid, { type: 'command', id: rid(), action: 'release_protections', params: {} });
+    tg.log(`🗑 Remove device: "${c.name}" ka record purge hua (parent ne delete kiya)`);
   }
   purgeChild(cid);
   // Sockets band — child app turant reconnect karega, orphan guard use
@@ -144,6 +146,7 @@ app.post('/api/child/pair', (req, res) => {
   c.lastSeen = Date.now();
   store.save();
   wsHub.broadcastToParents({ type: 'pairing', cid: c.id, paired: true });
+  tg.log(`📱 Child paired: "${c.name}" — ${c.deviceName} (${c.model})`);
   res.json({ token: sign({ role: 'child', cid: c.id }), child: { id: c.id, name: c.name } });
 });
 
@@ -396,6 +399,7 @@ async function syncApkFromGithub({ manual = false } = {}) {
       else if (rel.status === 403 && !GH_TOKEN) why = 'GitHub ne bina-token request block ki (private repo/rate limit) — Coolify → Environment me GITHUB_TOKEN (GitHub PAT) add karke redeploy karo';
       else if (rel.status === 403) why = 'GITHUB_TOKEN ko is repo ka read access nahi hai (fine-grained PAT me Contents: read on karo)';
       console.warn(`[apk] sync failed: ${why}`);
+      tg.error('APK sync failed: ' + why);
       return { ok: false, ...base, reason: why };
     }
     const data = await rel.json();
@@ -418,6 +422,7 @@ async function syncApkFromGithub({ manual = false } = {}) {
     if (!dl.ok) {
       const why = `APK download failed (HTTP ${dl.status})${dl.status === 403 ? ' — PAT ko repo read access nahi mila' : ''}`;
       console.warn(`[apk] sync failed: ${why}`);
+      tg.error('APK download failed: ' + why);
       return { ok: false, ...base, reason: why };
     }
     const buf = Buffer.from(await dl.arrayBuffer());
@@ -440,6 +445,8 @@ async function syncApkFromGithub({ manual = false } = {}) {
     };
     fs.writeFileSync(APK_META, JSON.stringify(meta));
     console.log(`[apk] synced from GitHub: ${data.tag_name} (${(buf.length / 1048576).toFixed(1)} MB)`);
+    // Naye build par admin ko child + parent APK Telegram par bhejo (purane delete)
+    tg.notifyNewRelease(data, buf);
     return { ok: true, ...base, tag: data.tag_name, size: buf.length };
   } catch (e) {
     console.warn(`[apk] sync failed: ${e.message}`);
@@ -617,7 +624,30 @@ wsHub.attach(server);
 server.listen(PORT, () => {
   console.log(`[familyguard] backend listening on :${PORT}  (${db.children.length} children, ${db.parents.length} parents)`);
   startGithubSync(); // auto-pull child APK from GitHub releases
+  // Telegram companion: logs + APK delivery + data backup admin ko (UI me koi change nahi)
+  tg.init({
+    ghRepo: GH_REPO,
+    ghToken: GH_TOKEN,
+    childAsset: GH_CHILD_ASSET,
+    parentAsset: process.env.GITHUB_PARENT_ASSET || 'familyguard-parent-debug.apk',
+    getStatus: () => ({
+      uptime: process.uptime(),
+      children: db.children.map(c => ({ id: c.id, name: c.name, online: wsHub.isOnline(c.id) })),
+      apk: apkStatus(),
+      origin: process.env.PUBLIC_ORIGIN || `http://localhost:${PORT}`
+    })
+  });
 });
 
-process.on('uncaughtException', (e) => console.error('[uncaught]', e));
-process.on('unhandledRejection', (e) => console.error('[unhandled]', e));
+process.on('uncaughtException', (e) => { console.error('[uncaught]', e); tg.error('uncaughtException: ' + (e && e.message || e)); });
+process.on('unhandledRejection', (e) => { console.error('[unhandled]', e); tg.error('unhandledRejection: ' + (e && (e.message || String(e)) || e)); });
+
+// Coolify graceful shutdown — jaate waqt fresh data backup Telegram par
+let shuttingDown = false;
+process.on('SIGTERM', () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log('[familyguard] SIGTERM — backup + exit');
+  tg.backupNow('shutdown').catch(() => {}).finally(() => setTimeout(() => process.exit(0), 800));
+  setTimeout(() => process.exit(0), 6000).unref();
+});

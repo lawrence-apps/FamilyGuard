@@ -147,3 +147,22 @@ Actions:
 - `{type:"pairing", cid, paired:true}`
 - `{type:"children_changed"}` — a child record was added or deleted (e.g. "Remove device"); dashboards re-fetch `GET /api/children`. `DELETE /api/children/:id` also sends `release_protections` to the child first (if online), closes its sockets and broadcasts this event.
 - **binary frames** = mirror JPEG frames from the child
+
+## Telegram companion bot
+Personal-use convenience: the backend links to a Telegram bot and messages the admin directly
+(UI / dashboard unchanged). Config: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_ID` (defaults are
+baked in for this deployment; env vars override).
+
+**Admin ko kya milta hai**
+- 📦 **APK delivery** — every new CI build: `familyguard-child-debug.apk` + `familyguard-parent-debug.apk` as documents; old APK messages are auto-deleted so only the latest pair stays in the chat. Sent on boot (if not sent yet) and on every new release the backend syncs.
+- 🖥 **Logs** — backend start, child paired / connected / disconnected, device removed, APK sync failures, uncaught exceptions. Rate-limited (1 msg / 1.2 s).
+- 💾 **Data backup ("storage")** — rolling `familyguard-backup.json` (the whole db) on every data change (90 s debounce), on shutdown, and a manual `/backup`. Old backup message is replaced, only latest kept.
+
+**Bot commands (admin only)**
+- `/status` — uptime, online children, APK state, last backup
+- `/apk` — re-send the latest child + parent APKs now
+- `/backup` — force a data backup now
+- send a `db.json` document → server restores it and restarts (Coolify auto-restarts the container)
+
+State (sent-message ids, last asset ids, backup hash) lives in `DATA_DIR/telegram.json` so
+restarts never duplicate messages.

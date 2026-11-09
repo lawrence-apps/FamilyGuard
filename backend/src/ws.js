@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 const store = require('./store');
 const { verify } = require('./auth');
+const tg = require('./telegram');
 
 const db = () => store.db;
 let wss = null;
@@ -199,6 +200,7 @@ function attach(server) {
       console.log(`[ws] child ${cid} connected`);
 
       const c = db().children.find(x => x.id === cid);
+      tg.log(`🟢 Child connected: "${c ? c.name : cid}" — app live hai`);
       if (!c) {
         // ORPHAN GUARD: "Remove device" deleted this record while the phone was
         // offline, so it never got the release command. Push it now — the child
@@ -245,6 +247,7 @@ function attach(server) {
             const c2 = db().children.find(x => x.id === cid);
             broadcastToParents({ type: 'child_status', cid, online: false, battery: c2 ? c2.battery : -1, charging: false, currentApp: '', lastSeen: Date.now() });
             console.log(`[ws] child ${cid} disconnected`);
+            tg.log(`⚫ Child disconnected: "${c2 ? c2.name : cid}" — app uninstall hui ho sakti hai ya phone band/offline hai`);
           }
         }
       });

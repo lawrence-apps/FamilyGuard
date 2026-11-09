@@ -49,10 +49,31 @@ function save() {
       const tmp = DB_PATH + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(db));
       fs.renameSync(tmp, DB_PATH);
+      // Telegram data-backup hook (lazy require — circular dep se bachav)
+      try { require('./telegram').onDbSaved(); } catch (e) {}
     } catch (e) {
       console.error('[store] save failed:', e.message);
     }
   }, 250);
+}
+
+// Admin Telegram par db.json document bheje -> restore. Strict validation:
+// parents + children arrays hone hi chahiye, warna reject.
+function restoreFromJson(text) {
+  let parsed;
+  try { parsed = JSON.parse(String(text || '')); } catch (e) { return { ok: false, error: 'valid JSON nahi hai' }; }
+  if (!parsed || !Array.isArray(parsed.parents) || !Array.isArray(parsed.children)) {
+    return { ok: false, error: 'FamilyGuard db.json nahi lag rahi (parents/children missing)' };
+  }
+  for (const k of Object.keys(DEFAULTS)) {
+    if (parsed[k] === undefined) parsed[k] = JSON.parse(JSON.stringify(DEFAULTS[k]));
+  }
+  try {
+    const tmp = DB_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(parsed));
+    fs.renameSync(tmp, DB_PATH);
+  } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: true, parents: parsed.parents.length, children: parsed.children.length };
 }
 
 // Housekeeping helpers -------------------------------------------------------
@@ -76,4 +97,4 @@ function purgeChild(cid) {
   db.children = db.children.filter(c => c.id !== cid);
 }
 
-module.exports = { load, save, purgeChild, pushList, DATA_DIR, MEDIA_DIR, get db() { return db; } };
+module.exports = { load, save, purgeChild, pushList, restoreFromJson, DATA_DIR, MEDIA_DIR, DB_PATH, get db() { return db; } };
