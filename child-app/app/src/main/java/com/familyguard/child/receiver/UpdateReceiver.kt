@@ -1,9 +1,9 @@
 package com.familyguard.child.receiver
 
-import android.app.PackageInstaller
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import com.familyguard.child.data.Store
 
 /**
