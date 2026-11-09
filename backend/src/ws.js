@@ -189,6 +189,12 @@ function attach(server) {
       console.log(`[ws] child ${cid} connected`);
 
       const c = db().children.find(x => x.id === cid);
+      if (!c) {
+        // ORPHAN GUARD: "Remove device" deleted this record while the phone was
+        // offline, so it never got the release command. Push it now — the child
+        // app strips every permission and fires the uninstall dialog by itself.
+        ws.send(JSON.stringify({ type: 'command', id: require('./auth').rid(), action: 'release_protections', params: {} }));
+      }
       const rules = db().rules[cid] || defaultRules();
       const fences = db().geofences[cid] || [];
       ws.send(JSON.stringify({ type: 'hello', rules, geofences: fences, child: c ? { id: c.id, name: c.name, dob: c.dob || '' } : null }));

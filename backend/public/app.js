@@ -253,9 +253,12 @@ function renderChildrenList() {
     '</span></div><button class="x" data-del="' + esc(c.id) + '">🗑</button></li>').join("") ||
     '<li class="muted">No children yet</li>';
   $("children-list").querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = () => dialog("Delete child?", "<p>This removes all synced data.</p>", async () => {
+    b.onclick = () => dialog("Remove device?", "<p>Child phone se saari permissions (accessibility, admin, screen sharing) hat jayengi, app wahan uninstall dialog dikha kar band ho jayegi, aur ye device data samet dashboard se hamesha ke liye delete ho jayega. Ye undo nahi hota. Continue?</p>", async () => {
+      // 1) strip permissions + fire the uninstall dialog on the child (if online)
+      try { await api("/api/commands", "POST", { cid: b.dataset.del, action: "release_protections", params: {} }); } catch (e) {}
+      // 2) wipe the record — an offline child self-releases on next connect (orphan guard)
       await api("/api/children/" + b.dataset.del, "DELETE");
-      S.cid = null;
+      if (S.cid === b.dataset.del) S.cid = null;
       await refreshChildren();
     });
   });

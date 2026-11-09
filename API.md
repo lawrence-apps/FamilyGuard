@@ -19,7 +19,7 @@ JWT payload: `{ "role": "parent"|"child", "pid"?, "username"?, "cid"? }`
 ### Children management (parent auth)
 - `POST /api/children` `{name, dob:"YYYY-MM-DD"}` → `{child:{id,name,dob,pairingCode,paired,...}}` (dob = child's date of birth, drives the age-18 auto-release)
 - `GET /api/children` → `{children:[{id,name,dob,paired,pairingCode,online,lastSeen,battery,deviceName,model,currentApp}]}`
-- `DELETE /api/children/:id` → `{ok:true}` (purges all data of that child)
+- `DELETE /api/children/:id` → `{ok:true}` (purges all data of that child). UI flow ("Remove device"): send `release_protections` first so the child app strips every permission and fires the uninstall dialog, then delete. If the phone was offline and connects later with a deleted record, the server pushes `release_protections` automatically (orphan guard) — the app cleans itself up.
 - `POST /api/children/:id/regenerate-code` → `{pairingCode}`
 
 ### Child self profile

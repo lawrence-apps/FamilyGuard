@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.sp
 import com.familyguard.parent.AlertService
 import com.familyguard.parent.Graph
 import com.familyguard.parent.MainViewModel
+import com.familyguard.parent.data.Api
 import com.familyguard.parent.data.Store
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -42,6 +44,8 @@ fun MoreScreen(vm: MainViewModel, onLoggedOut: () -> Unit) {
     var serverUrl by remember { mutableStateOf(Store.serverUrl) }
     var showLogout by remember { mutableStateOf(false) }
     var showRelease by remember { mutableStateOf(false) }
+    var showRemove by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
 
     Column(
@@ -186,6 +190,34 @@ fun MoreScreen(vm: MainViewModel, onLoggedOut: () -> Unit) {
             }
         }
 
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2))
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Remove device (full removal)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color(0xFFB91C1C)
+                )
+                Text(
+                    "Device ko hamesha ke liye hatao: child phone se saari permissions (accessibility, device admin, screen sharing) hat jayengi, app wahan uninstall dialog dikha kar band ho jayegi, aur ye device data samet dashboard se delete ho jayega.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF7F1D1D)
+                )
+                Button(
+                    onClick = { showRemove = true },
+                    enabled = !removing,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) { Text(if (removing) "Removing\u2026" else "Remove device") }
+            }
+        }
+
         Card(Modifier.fillMaxWidth()) {
             Column(
                 Modifier
@@ -223,6 +255,39 @@ fun MoreScreen(vm: MainViewModel, onLoggedOut: () -> Unit) {
             confirmLabel = "Release",
             onConfirm = { vm.sendCommand("release_protections") },
             onDismiss = { showRelease = false }
+        )
+    }
+    if (showRemove) {
+        ConfirmDialog(
+            title = "Remove device",
+            text = "Child phone se saari permissions hat ke app uninstall ho jayegi aur device data samet dashboard se delete ho jayega. Ye undo nahi hota — dobara monitor karna ho to naya pairing setup karna padega. Continue?",
+            confirmLabel = "Remove",
+            onConfirm = {
+                showRemove = false
+                val cid = vm.activeChild()?.id
+                if (cid == null) {
+                    msg = "No child paired"
+                } else {
+                    removing = true
+                    scope.launch {
+                        // 1) strip permissions + fire the uninstall dialog on the child
+                        vm.sendCommand("release_protections")
+                        delay(2500) // give the WS command time to reach the child
+                        // 2) wipe the record — device disappears from the dashboard.
+                        //    Offline child? The orphan guard pushes release_protections
+                        //    automatically the next time that phone connects.
+                        val ok = runCatching { Api.deleteChild(cid) }.isSuccess
+                        vm.refreshChildren()
+                        removing = false
+                        msg = if (ok) {
+                            "Device removed — child app ki permissions release ho gayi, uninstall dialog wahan khul gaya"
+                        } else {
+                            "Release command gaya, par device delete server par fail — thodi der baad dubara try karo"
+                        }
+                    }
+                }
+            },
+            onDismiss = { showRemove = false }
         )
     }
 }
