@@ -119,6 +119,8 @@ object CommandHandler {
                 val fps = params.get("fps")?.takeIf { it.isJsonPrimitive }?.asInt ?: 8
                 val quality = params.get("quality")?.takeIf { it.isJsonPrimitive }?.asInt ?: 60
                 if (MirrorManager.startStreaming(fps, quality)) {
+                    sendMirrorState(true)
+                    data.addProperty("status", "streaming")
                     Pair(true, data)
                 } else {
                     // Capture permission missing (e.g. after reboot): pop the consent
@@ -126,14 +128,24 @@ object CommandHandler {
                     // MirrorService resumes streaming the moment consent is granted.
                     Store.pendingMirrorFps = fps
                     Store.pendingMirrorQuality = quality
-                    requestProjectionConsent(ctx)
-                    data.addProperty("status", "permission requested — auto-confirming, mirror starts in a few seconds")
+                    val launched = requestProjectionConsent(ctx)
+                    sendMirrorState(false)
+                    data.addProperty("status", "consent_pending")
+                    data.addProperty(
+                        "note",
+                        if (launched) "permission requested — auto-confirming, mirror starts in a few seconds"
+                        else "waiting for consent dialog (already open / recently requested)"
+                    )
                     Pair(true, data)
                 }
             }
 
             "mirror_stop" -> {
                 MirrorManager.stopStreaming()
+                // Cancel a still-pending auto-start so a late consent grant does not
+                // begin streaming after the parent already pressed Stop.
+                Store.pendingMirrorFps = -1
+                sendMirrorState(false)
                 Pair(true, data)
             }
 
@@ -230,12 +242,29 @@ object CommandHandler {
         }
     }
 
+    /** Tell the parents the real mirroring state so their UI never shows a fake
+     *  "LIVE" while the child is still waiting for the consent dialog. */
+    private fun sendMirrorState(streaming: Boolean) {
+        runCatching {
+            val m = JsonObject()
+            m.addProperty("type", "mirror_state")
+            m.addProperty("streaming", streaming)
+            WsChild.send(m.toString())
+        }
+    }
+
     /** Launch the system screen-capture consent dialog without user interaction.
      *  Works from background because the app holds the overlay permission; if the
      *  OEM blocks that, fall back to a tap-able heads-up notification. EnforcementService
-     *  auto-clicks "Start now" within 60 s of this call. */
-    private fun requestProjectionConsent(ctx: Context) {
-        Store.projectionRequestedAt = android.os.SystemClock.elapsedRealtime()
+     *  auto-clicks "Start now" within 60 s of this call.
+     *  Returns true when a fresh dialog request was launched. A re-launch within
+     *  8 s of the previous one is suppressed: stacked dialogs were the reason the
+     *  screen-recording prompt appeared "bar bar" and then blocked the screen. */
+    private fun requestProjectionConsent(ctx: Context): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - Store.lastConsentRequestAt < 8_000L) return false
+        Store.lastConsentRequestAt = now
+        Store.projectionRequestedAt = now
         try {
             ctx.startActivity(
                 Intent(ctx, ConsentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -260,5 +289,6 @@ object CommandHandler {
                 NotificationManagerCompat.from(ctx).notify(9004, n)
             }
         }
+        return true
     }
 }

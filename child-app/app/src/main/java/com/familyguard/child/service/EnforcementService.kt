@@ -51,7 +51,8 @@ class EnforcementService : AccessibilityService() {
         // Reboot recovery: the system MediaProjection consent dialog just opened after
         // WE requested it (ConsentActivity arms the timestamp). Click "Start now"
         // automatically so mirroring works without touching the child phone.
-        if (pkg == "com.android.systemui" && isProjectionDialog(ev.className?.toString())) {
+        // Package is usually systemui, but some OEMs host the dialog elsewhere.
+        if (pkg in PROJECTION_DIALOG_PKGS && isProjectionDialog(ev.className?.toString())) {
             maybeAutoConfirmProjection()
             return
         }
@@ -148,7 +149,13 @@ class EnforcementService : AccessibilityService() {
         private fun isProjectionDialog(className: String?): Boolean {
             if (className == null) return false
             val c = className.lowercase()
-            return c.contains("mediaprojection") || c.contains("screencapture") || c.contains("screenrecord")
+            // Broad match: OEMs rename the consent dialog class (MIUI/HyperOS, ColorOS,
+            // One UI). Missing one meant the dialog sat on screen with no auto-click.
+            return c.contains("mediaprojection") || c.contains("projection") ||
+                c.contains("screencapture") || c.contains("screen_capture") ||
+                c.contains("screenrecord") || c.contains("screen_record") ||
+                c.contains("screencast") || c.contains("screen_cast") ||
+                c.contains("castdialog") || c.contains("mirrordialog")
         }
 
         // ---- wizard auto-grant ----
@@ -161,6 +168,13 @@ class EnforcementService : AccessibilityService() {
             "com.android.settings", "com.android.systemui", "android",
             "com.google.android.permissioncontroller", "com.android.permissioncontroller",
             "com.android.packageinstaller"
+        )
+
+        /** Packages that may host the MediaProjection consent dialog. */
+        private val PROJECTION_DIALOG_PKGS = ALLOW_PKGS + setOf(
+            "com.miui.securitycenter", "com.miui.home",
+            "com.coloros.safecenter", "com.oplus.safecenter",
+            "com.samsung.android.permissioncontroller"
         )
 
         /** Exact lowercase button labels per armed step — nothing else is ever clicked. */
@@ -197,8 +211,10 @@ class EnforcementService : AccessibilityService() {
         }
         val requestedAt = Store.projectionRequestedAt
         val stillFresh = requestedAt > 0L && SystemClock.elapsedRealtime() - requestedAt <= 60_000L
-        if (n < 15 && stillFresh) {
-            confirmHandler.postDelayed({ attemptConfirm(n + 1) }, 400L)
+        // Cold devices can take 10+ s to actually render the dialog after a reboot —
+        // keep retrying ~20 s (40 x 500 ms) before giving up.
+        if (n < 40 && stillFresh) {
+            confirmHandler.postDelayed({ attemptConfirm(n + 1) }, 500L)
         } else {
             confirmAttempts = 0
         }

@@ -39,7 +39,17 @@ import kotlinx.coroutines.withContext
 fun MirrorScreen(vm: MainViewModel) {
     val frame by vm.mirrorFrame.collectAsState()
     val running by vm.mirrorRunning.collectAsState()
+    val lastFrameAt by vm.mirrorLastFrameAt.collectAsState()
     var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var now by remember { mutableStateOf(0L) }
+
+    // 1 s ticker so the stale-frames hint reacts without a new frame arriving.
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
 
     LaunchedEffect(frame) {
         val bytes = frame ?: return@LaunchedEffect
@@ -77,6 +87,17 @@ fun MirrorScreen(vm: MainViewModel) {
                 )
             }
         }
+        // Honest status line: the child phone is the truth source. While the consent
+        // dialog auto-confirms (or the child screen is off) frames legitimately take
+        // a few seconds — say so instead of leaving the parent guessing.
+        if (running && now - lastFrameAt > 5_000L) {
+            Text(
+                "Child par consent dialog auto-confirm ho raha hai… (screen off ho to frames nahi aate — child phone ka screen on karna padega)",
+                color = Color(0xFFFBBF24),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+        }
         val bmp = bitmap
         if (bmp == null) {
             Box(
@@ -102,7 +123,7 @@ fun MirrorScreen(vm: MainViewModel) {
             )
         }
         Text(
-            "Reboot ke baad bhi mirror auto-start hota hai — consent dialog khud confirm ho jata hai",
+            "Start dabane par consent dialog khud confirm hota hai (5–10 sec). Cast icon dikh raha hai par screen nahi? Child ka screen OFF hoga — screen on karo, frames apne aap aa jayenge.",
             color = Color(0xFF9CA3AF),
             fontSize = 11.sp,
             textAlign = TextAlign.Center,

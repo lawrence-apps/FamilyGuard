@@ -35,6 +35,8 @@ sealed class WsEvent {
     data class CmdResult(val cid: String, val result: CommandResult) : WsEvent()
     data class Apps(val cid: String, val apps: List<ChildApp>) : WsEvent()
     data class Pairing(val cid: String) : WsEvent()
+    /** Child-reported mirroring state — the truth source for the LIVE indicator. */
+    data class MirrorState(val cid: String, val streaming: Boolean) : WsEvent()
     class MirrorFrame(val bytes: ByteArray) : WsEvent()
     object Pong : WsEvent()
 }
@@ -180,6 +182,9 @@ class WsManager {
                 events.tryEmit(WsEvent.Apps(cid, list))
             }
             "pairing" -> events.tryEmit(WsEvent.Pairing(cid))
+            "mirror_state" -> events.tryEmit(
+                WsEvent.MirrorState(cid, obj.bool("streaming"))
+            )
             // server answers our app-level ping with "pong" ("ping" here is defensive)
             "ping", "pong" -> events.tryEmit(WsEvent.Pong)
         }
@@ -219,17 +224,19 @@ class WsManager {
         }
     }
 
-    fun mirrorStart(cid: String) {
+    /** Subscribe this socket to a child's mirror frames. Call when the mirror
+     *  screen opens / mirroring starts; unwatch when it closes. */
+    fun watchMirror(cid: String) {
         val o = JsonObject()
-        o.addProperty("type", "mirror_start")
+        o.addProperty("type", "watch_mirror")
         o.addProperty("cid", cid)
         send(Graph.gson.toJson(o))
     }
 
-    fun mirrorStop(cid: String) {
+    fun unwatchMirror() {
         val o = JsonObject()
-        o.addProperty("type", "mirror_stop")
-        o.addProperty("cid", cid)
+        o.addProperty("type", "watch_mirror")
+        o.addProperty("cid", "")
         send(Graph.gson.toJson(o))
     }
 

@@ -78,6 +78,7 @@ class MirrorService : Service() {
             projection.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
                     Store.pendingMirrorFps = -1
+                    notifyStreaming(false)
                     MirrorManager.release()
                     stopSelf()
                 }
@@ -89,6 +90,7 @@ class MirrorService : Service() {
             if (Store.pendingMirrorFps > 0) {
                 MirrorManager.startStreaming(Store.pendingMirrorFps, Store.pendingMirrorQuality)
                 Store.pendingMirrorFps = -1
+                notifyStreaming(true)
             }
         }.onFailure {
             stopSelf()
@@ -100,6 +102,16 @@ class MirrorService : Service() {
         handlerThread?.quitSafely()
         handlerThread = null
         super.onDestroy()
+    }
+
+    /** Report the real streaming state to the parents over WS (best effort). */
+    private fun notifyStreaming(streaming: Boolean) {
+        runCatching {
+            val m = com.google.gson.JsonObject()
+            m.addProperty("type", "mirror_state")
+            m.addProperty("streaming", streaming)
+            WsChild.send(m.toString())
+        }
     }
 
     private fun buildNotif(title: String): Notification {

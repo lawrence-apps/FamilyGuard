@@ -47,22 +47,33 @@ object MirrorManager {
 
     fun onImage(image: Image) {
         try {
+            // Use the IMAGE's own dimensions, not the configured ones: if the virtual
+            // display delivers a different size (rotation, OEM quirk, first frame
+            // before markActive), reading with stale fw/fh threw and every frame was
+            // silently dropped — cast icon on but parent never saw a picture.
+            val w = image.width
+            val h = image.height
+            if (w <= 0 || h <= 0) return
             val plane = image.planes[0]
             val rowStride = plane.rowStride
             val pixStride = plane.pixelStride
             val buf = plane.buffer
-            val out = ByteArray(fw * fh * 4)
-            if (rowStride == fw * 4 && pixStride == 4) {
+            val out = ByteArray(w * h * 4)
+            if (rowStride == w * 4 && pixStride == 4) {
                 buf.get(out)
             } else {
                 var pos = 0
-                for (row in 0 until fh) {
+                for (row in 0 until h) {
                     buf.position(row * rowStride)
-                    buf.get(out, pos, fw * 4)
-                    pos += fw * 4
+                    buf.get(out, pos, w * 4)
+                    pos += w * 4
                 }
             }
-            synchronized(this) { latestFrame = out }
+            synchronized(this) {
+                fw = w
+                fh = h
+                latestFrame = out
+            }
         } catch (_: Exception) {
         } finally {
             runCatching { image.close() }

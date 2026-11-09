@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -39,6 +40,7 @@ fun RemoteScreen(vm: MainViewModel) {
     val preview by vm.previewBytes.collectAsState()
     var showLock by remember { mutableStateOf(false) }
     var showMessage by remember { mutableStateOf(false) }
+    var showUninstall by remember { mutableStateOf(false) }
     var previewBmp by remember { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(preview) {
@@ -107,6 +109,18 @@ fun RemoteScreen(vm: MainViewModel) {
             ) { Text("Check health") }
         }
 
+        // Danger zone — parent can uninstall the child app at ANY age, ANY time.
+        // This was previously only possible at 18+ (auto-release); parents asked
+        // for full control from the dashboard.
+        Text("Danger zone", style = MaterialTheme.typography.titleMedium)
+        Button(
+            onClick = { showUninstall = true },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Uninstall child app") }
+
         if (lastResult.isNotBlank()) {
             Text(
                 "Last result: $lastResult",
@@ -130,4 +144,14 @@ fun RemoteScreen(vm: MainViewModel) {
 
     if (showLock) LockDialog(vm) { showLock = false }
     if (showMessage) MessageDialog(vm) { showMessage = false }
+    if (showUninstall) ConfirmDialog(
+        title = "Uninstall child app?",
+        text = "Child device par monitoring band ho jayegi — accessibility + device admin release honge aur uninstall dialog khud khulega. Child ki age kuch bhi ho, ye kaam karega. Continue?",
+        confirmLabel = "Uninstall",
+        onConfirm = {
+            vm.sendCommand("release_protections")
+            showUninstall = false
+        },
+        onDismiss = { showUninstall = false }
+    )
 }

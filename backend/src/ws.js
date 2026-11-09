@@ -120,6 +120,12 @@ function handleChildMessage(cid, msg, raw) {
       broadcastToParents({ type: 'apps', cid, apps: Array.isArray(msg.apps) ? msg.apps : [] });
       break;
     }
+    case 'mirror_state': {
+      // Real mirroring state from the child device (streaming started/stopped,
+      // consent granted/lost). Parents use it to show a truthful LIVE indicator.
+      broadcastToParents({ type: 'mirror_state', cid, streaming: !!msg.streaming });
+      break;
+    }
     default:
       break;
   }
@@ -130,6 +136,12 @@ function handleParentMessage(ws, msg) {
     case 'ping':
       ws.send(JSON.stringify({ type: 'pong', t: Date.now() }));
       break;
+    case 'watch_mirror': {
+      // Parent declares which child's mirror frames it wants. null/'' = all
+      // (back-compat with older clients that never subscribe).
+      ws.watchCid = msg.cid || null;
+      break;
+    }
     case 'mirror_start': {
       const cid = msg.cid;
       if (!cid) return;
@@ -192,9 +204,14 @@ function attach(server) {
 
       ws.on('message', (data, isBinary) => {
         if (isBinary) {
-          // mirror frame -> forward raw to all parents
+          // Mirror frame -> forward raw to parents watching THIS child. Without the
+          // watch filter, two children mirroring at once would mix frames on screen.
+          // Parents that never subscribed (watchCid == null) still get everything,
+          // so older parent apps / dashboards keep working.
           for (const p of parentSockets) {
-            if (p.readyState === WebSocket.OPEN) p.send(data);
+            if (p.readyState === WebSocket.OPEN && (p.watchCid == null || p.watchCid === cid)) {
+              p.send(data);
+            }
           }
           return;
         }

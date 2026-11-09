@@ -32,7 +32,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val events = MutableStateFlow<List<EventItem>>(emptyList())
     val notifs = MutableStateFlow<List<NotifItem>>(emptyList())
     val mirrorFrame = MutableStateFlow<ByteArray?>(null)
+    /** Truth from the CHILD (mirror_state events), never an optimistic guess —
+     *  a fake LIVE while consent was still pending made parents think mirroring
+     *  was broken ("cast sign but no screen"). */
     val mirrorRunning = MutableStateFlow(false)
+    /** last mirror frame arrival (System.currentTimeMillis()) for the staleness hint. */
+    val mirrorLastFrameAt = MutableStateFlow(0L)
     val apps = MutableStateFlow<List<ChildApp>>(emptyList())
     val lastResult = MutableStateFlow("")
     val previewBytes = MutableStateFlow<ByteArray?>(null)
@@ -78,20 +83,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             is WsEvent.Event -> events.value = (listOf(ev.event) + events.value).take(300)
             is WsEvent.Notif -> notifs.value = (listOf(ev.notif) + notifs.value).take(300)
-            is WsEvent.CmdResult -> onCommandResult(ev.result)
+            is WsEvent.CmdResult -> onCommandResult(ev.cid, ev.result)
             is WsEvent.Apps -> apps.value = ev.apps
             is WsEvent.Pairing -> refreshChildren()
-            is WsEvent.MirrorFrame -> mirrorFrame.value = ev.bytes
+            is WsEvent.MirrorState -> {
+                if (ev.cid == activeChildId.value) mirrorRunning.value = ev.streaming
+            }
+            is WsEvent.MirrorFrame -> {
+                mirrorLastFrameAt.value = System.currentTimeMillis()
+                mirrorFrame.value = ev.bytes
+            }
             is WsEvent.Location -> Unit // consumed live by LocationScreen
             WsEvent.Pong -> Unit
         }
     }
 
-    private fun onCommandResult(r: CommandResult) {
+    private fun onCommandResult(cid: String, r: CommandResult) {
         lastResult.value = if (r.ok) {
             "OK" + (r.data?.let { " — $it" } ?: "")
         } else {
             "Command failed (id ${r.id})"
+        }
+        // Child confirmed actual streaming via the command result (status field set
+        // by CommandHandler.mirror_start). This is the earliest truth we can get.
+        if (r.ok && cid == activeChildId.value) {
+            val st = r.data?.get("status")
+            if (st?.isJsonPrimitive == true) {
+                when (st.asString) {
+                    "streaming" -> mirrorRunning.value = true
+                    // Consent dialog popped & auto-confirm in progress: keep the UI
+                    // honest ("starting…"), streaming flips true via mirror_state.
+                    "consent_pending" -> mirrorRunning.value = false
+                }
+            }
         }
         val url = r.data?.get("url")
         if (r.ok && url != null && url.isJsonPrimitive) {
@@ -182,20 +206,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startMirror() {
-        mirrorRunning.value = true
+        // ONE command path only. This used to fire BOTH a REST command and a WS
+        // mirror_start — the child received two mirror_start commands, popped the
+        // system screen-recording consent dialog TWICE ("bar bar aa raha tha") and
+        // the stacked dialogs blocked the screen.
+        mirrorRunning.value = false
+        mirrorLastFrameAt.value = 0L
         val params = JsonObject().apply {
             addProperty("fps", 8)
             addProperty("quality", 60)
             addProperty("maxWidth", 720)
         }
+        activeChild()?.id?.let { Graph.ws.watchMirror(it) }
         sendCommand("mirror_start", params)
-        activeChild()?.id?.let { Graph.ws.mirrorStart(it) }
     }
 
     fun stopMirror() {
-        mirrorRunning.value = false
         sendCommand("mirror_stop")
-        activeChild()?.id?.let { Graph.ws.mirrorStop(it) }
+        Graph.ws.unwatchMirror()
+        mirrorRunning.value = false
     }
 
     fun loadEvents(cid: String) {

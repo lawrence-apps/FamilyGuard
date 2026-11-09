@@ -98,6 +98,12 @@ object Store {
     @Volatile
     var projectionRequestedAt: Long = 0L
 
+    /** SystemClock.elapsedRealtime() of the last ConsentActivity launch. Prevents
+     *  stacked consent dialogs when the parent taps "Start mirroring" repeatedly
+     *  while capture permission is still missing. */
+    @Volatile
+    var lastConsentRequestAt: Long = 0L
+
     /** Parent pressed "Start mirroring" while capture permission was missing
      *  (e.g. right after reboot). fps >= 0 means a mirror start is pending and
      *  streaming resumes automatically as soon as consent is granted. */

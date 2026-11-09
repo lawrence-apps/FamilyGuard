@@ -55,6 +55,7 @@ header h1 { font-size: 19px; }
 }
 .card h3 { margin: 0 0 8px; font-size: 16px; }
 .card.amber { background: #fffbeb; border: 1px solid #fcd34d; }
+.card.red-outline { background: #fef2f2; border: 1px solid #fca5a5; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }

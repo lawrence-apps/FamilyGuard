@@ -40,7 +40,9 @@ class ConsentActivity : ComponentActivity() {
         }
         // Arm the accessibility auto-confirm: EnforcementService will click
         // "Start now" on the system dialog within this window.
-        Store.projectionRequestedAt = SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
+        Store.lastConsentRequestAt = now
+        Store.projectionRequestedAt = now
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
         runCatching { projLauncher.launch(mgr.createScreenCaptureIntent()) }.onFailure { finish() }
     }

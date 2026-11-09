@@ -101,8 +101,12 @@
         <div id="cmd-status" class="small muted"></div>
       </div>
       <div class="card hidden amber" id="adult-card">
-        ⚠️ Child is 18+. You can release all protections — the child app will uninstall itself.
-        <button id="release-btn" class="btn danger">Release protections</button>
+        ⚠️ Child is 18+. Protections will also auto-release on their own — the child app will uninstall itself.
+      </div>
+      <div class="card red-outline" id="danger-card">
+        <h3>Danger zone</h3>
+        <p class="muted small">Child app ko kisi bhi age me, kabhi bhi uninstall kar sakte hain — accessibility + admin release honge, monitoring band hogi aur child phone par system uninstall dialog khud khulega.</p>
+        <button id="release-btn" class="btn danger">🗑 Uninstall child app</button>
       </div>
     </section>
 
@@ -178,8 +182,9 @@
         <button id="mirror-stop" class="btn danger hidden">■ Stop</button>
         <span id="mirror-fps" class="muted small"></span>
       </div>
+      <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
       <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
-      <p class="muted small">Reboot ke baad bhi mirror apne aap chalu ho jata hai — zarurat hone par consent dialog khud khul kar auto-confirm ho jata hai, child phone chhue bina. (Services, location, usage, notifications — sab boot par apne aap revive hote hain.)</p>
+      <p class="muted small">Start dabane par consent dialog khud confirm hota hai (5–10 sec lagte hain). Cast icon dikh raha hai par screen nahi aa rahi? Child ka screen OFF hoga — screen off rahi to frames nahi banti, screen on karte hi frames apne aap aane lagte hain.</p>
     </section>
 
     <!-- ALERTS -->
@@ -207,8 +212,8 @@
       </div>
       <div class="card">
         <h3>Danger zone</h3>
-        <p class="muted small">Release disables accessibility + admin, stops monitoring and fires the system uninstall dialog on the child device (also automatic at age 18).</p>
-        <button id="release-btn-2" class="btn danger">Release protections now</button>
+        <p class="muted small">Uninstall child app — kisi bhi age me kaam karta hai. Release disables accessibility + admin, stops monitoring and fires the system uninstall dialog on the child device (also automatic at age 18).</p>
+        <button id="release-btn-2" class="btn danger">🗑 Uninstall child app</button>
       </div>
       <div class="card">
         <h3>About</h3>
