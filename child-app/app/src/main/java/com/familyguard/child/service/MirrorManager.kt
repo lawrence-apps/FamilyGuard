@@ -60,8 +60,13 @@ object MirrorManager {
             fh = h
             hasProjection = true
             // Idle from the start: no pixels are rendered/copied until the parent
-            // actually streams — the session just sits warm and ready.
-            runCatching { vd.setSurface(null) }
+            // actually streams. BUT agar mirror_start pending hai (consent abhi
+            // confirm hua) to surface attached HI rehne do — kuch Samsung ROMs par
+            // setSurface(null) → setSurface(surface) re-attach par frames band ho
+            // jate hain, jo "consent hui par screen nahi aayi" ka doosra reason tha.
+            if (com.familyguard.child.data.Store.pendingMirrorFps <= 0) {
+                runCatching { vd.setSurface(null) }
+            }
         }
     }
 
