@@ -595,7 +595,7 @@ class MainActivity : ComponentActivity() {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
             }
         }
-        StepCard(5, "Notification access", "Syncs notifications to the parent app", notifDone, compact,
+        StepCard(5, "Notification access", "Syncs notifications to the parent dashboard (website)", notifDone, compact,
             actionLabel = "Open settings") {
             runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         }
@@ -603,7 +603,7 @@ class MainActivity : ComponentActivity() {
             actionLabel = "Grant") {
             camLauncher.launch(Manifest.permission.CAMERA)
         }
-        StepCard(7, "Calls & SMS", "Sync call log and SMS to the parent app", callsDone, compact, optional = true,
+        StepCard(7, "Calls & SMS", "Sync call log and SMS to the parent dashboard (website)", callsDone, compact, optional = true,
             actionLabel = "Grant") {
             callsLauncher.launch(
                 arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS)

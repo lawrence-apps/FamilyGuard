@@ -1,4 +1,4 @@
-name: Build APKs
+name: Build Child APK
 
 on:
   push:
@@ -6,32 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  parent-apk:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
-
-      - name: Build parent app
-        working-directory: parent-app
-        run: gradle assembleDebug --no-daemon
-
-      - name: Upload parent APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: familyguard-parent-debug-apk
-          path: parent-app/app/build/outputs/apk/debug/app-debug.apk
-
   child-apk:
     runs-on: ubuntu-latest
     steps:
@@ -58,16 +32,17 @@ jobs:
           name: familyguard-child-debug-apk
           path: child-app/app/build/outputs/apk/debug/app-debug.apk
 
-  # Publish both APKs to a rolling GitHub release (tag "latest") so the backend
-  # can auto-sync the child APK from it — no manual upload in the dashboard.
+  # Publish child APK to a rolling GitHub release (tag "latest") so the backend
+  # can auto-sync it — no manual upload in the dashboard. Parent app removed:
+  # parents sirf website dashboard use karte hain.
   publish:
     if: github.ref == 'refs/heads/main'
-    needs: [parent-apk, child-apk]
+    needs: [child-apk]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download built APKs
+      - name: Download built APK
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -78,11 +53,10 @@ jobs:
         run: |
           mkdir -p out
           cp dist/familyguard-child-debug-apk/app-debug.apk  out/familyguard-child-debug.apk
-          cp dist/familyguard-parent-debug-apk/app-debug.apk out/familyguard-parent-debug.apk
           cd out
           gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create latest -R "$GITHUB_REPOSITORY" \
                  --title "Latest builds (auto)" \
                  --notes "Auto-built from commit ${GITHUB_SHA::7} — backend inhe khud sync karta hai."
           gh release upload latest -R "$GITHUB_REPOSITORY" --clobber \
-            familyguard-child-debug.apk familyguard-parent-debug.apk
+            familyguard-child-debug.apk

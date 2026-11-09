@@ -196,13 +196,18 @@
 
     <!-- REPORT -->
     <section id="tab-report" class="tab hidden">
+      <div class="card amber hidden" id="perm-diag" style="font-size:13px"></div>
       <div class="card">
         <h3>📱 Apps & usage</h3>
         <p class="muted small">App list bachche ke phone se sync hoti hai. Usage = aaj ka.</p>
         <div id="apps-list"></div>
       </div>
       <div class="card">
-        <h3>☎️ Call log</h3>
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="margin:0">☎️ Call log</h3>
+          <button id="logs-sync" class="btn small">🔄 Sync now</button>
+        </div>
+        <p class="muted small" id="logs-hint">Calls bachche ke phone se sync ho kar yahan aate hain.</p>
         <ul id="calls-list" class="feed"></ul>
       </div>
       <div class="card">
@@ -335,6 +340,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

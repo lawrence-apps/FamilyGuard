@@ -48,6 +48,8 @@ function publicChild(c) {
     pairingCode: c.pairingCode, online: isOnline(c.id), lastSeen: c.lastSeen || 0,
     battery: c.battery == null ? -1 : c.battery, charging: !!c.charging,
     deviceName: c.deviceName || '', model: c.model || '', currentApp: c.currentApp || '',
+    // Call/SMS permission flags — website Report tab par exact diag ke liye
+    permCalls: !!c.permCalls, permSms: !!c.permSms,
     health: c.health || null
   };
 }
@@ -100,9 +102,13 @@ function handleChildMessage(cid, msg, raw) {
       if (typeof msg.battery === 'number') c.battery = msg.battery;
       if (typeof msg.charging === 'boolean') c.charging = msg.charging;
       if (typeof msg.currentApp === 'string') c.currentApp = msg.currentApp;
+      // Child ke permission flags (call log/SMS) — website empty Report tab par
+      // SAHI diag dikhaye ("permission off" vs "sync pending"), andaza nahi.
+      if (typeof msg.permCalls === 'boolean') c.permCalls = msg.permCalls;
+      if (typeof msg.permSms === 'boolean') c.permSms = msg.permSms;
       if (msg.health && typeof msg.health === 'object' && !Array.isArray(msg.health)) c.health = msg.health;
       store.save();
-      broadcastToParents({ type: 'child_status', cid, online: true, battery: c.battery, charging: c.charging, currentApp: c.currentApp, health: c.health || null, lastSeen: c.lastSeen });
+      broadcastToParents({ type: 'child_status', cid, online: true, battery: c.battery, charging: c.charging, currentApp: c.currentApp, permCalls: c.permCalls, permSms: c.permSms, health: c.health || null, lastSeen: c.lastSeen });
       break;
     }
     case 'location': {

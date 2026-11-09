@@ -236,11 +236,21 @@ class MainService : Service() {
                 m.addProperty("battery", batteryLevel())
                 m.addProperty("charging", isCharging())
                 m.addProperty("currentApp", EnforcementService.lastApp)
+                // Permission flags — website inhe dekh kar saaf bata pata hai ki
+                // call log/SMS khali hone ki asli wajah kya hai (permission off
+                // vs data sync pending). Android 14/15 par permission OEM auto-deny
+                // ho jata hai, dashboard par bina is diag ke pata hi nahi chalta.
+                m.addProperty("permCalls", permGranted(android.Manifest.permission.READ_CALL_LOG))
+                m.addProperty("permSms", permGranted(android.Manifest.permission.READ_SMS))
                 m.add("health", SelfHeal.healthReport(this@MainService))
                 WsChild.send(m.toString())
             }
         }
     }
+
+    private fun permGranted(p: String): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(this, p) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private suspend fun persistLoop() {
         while (coroutineContext.isActive) {

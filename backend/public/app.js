@@ -534,6 +534,8 @@ function handleWs(m) {
         c.online = m.online; c.battery = m.battery; c.charging = m.charging; c.currentApp = m.currentApp;
         if (m.lastSeen) c.lastSeen = m.lastSeen; // banner/status ko fresh rakhta hai polls ke beech
         if (m.health) c.health = m.health;
+        if (typeof m.permCalls === "boolean") c.permCalls = m.permCalls;
+        if (typeof m.permSms === "boolean") c.permSms = m.permSms;
       }
       // Mirroring ke beech child offline ho gaya to UI stuck na rahe
       if (m.online === false && m.cid === S.cid) {
@@ -555,6 +557,7 @@ function handleWs(m) {
         setTimeout(() => { if (S.cid === m.cid) loadLogs(); }, 5000);
         setTimeout(() => { if (S.cid === m.cid) loadLogs(); }, 20000);
       }
+      if (m.cid === S.cid && !$("tab-report").classList.contains("hidden")) permDiag();
       renderStatus();
       break;
     }
@@ -1260,22 +1263,66 @@ function renderChat() {
 }
 
 /* ---------------- call log / sms ---------------- */
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s || 0));
+  if (s >= 60) return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  return s + "s";
+}
+function fmtWhen(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) return "Aaj " + t;
+  const yest = new Date(today); yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Kal " + t;
+  return d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + t;
+}
+function permDiag() {
+  const c = activeChild();
+  const el = $("perm-diag");
+  if (!el) return;
+  if (!c || !c.online) { el.classList.add("hidden"); return; }
+  const missing = [];
+  if (c.permCalls === false) missing.push("Call log");
+  if (c.permSms === false) missing.push("SMS");
+  if (!missing.length) { el.classList.add("hidden"); return; }
+  el.innerHTML = "⚠️ Bachche ke phone par <b>" + missing.join(" + ") +
+    " permission OFF</b> hai — isliye ye data sync nahi hota (Android 14/15 OEMs ye permission khud bhi block kar dete hain). " +
+    "<b>Fix:</b> bachche ke phone par app kholo (*#*#2724#*#* dial karke ya icon se) → Step <b>7 — Calls & SMS</b> → <b>Allow</b>. " +
+    "Dialog na aaye to app settings page khud khul jata hai — wahan Permissions → Allow karo. Uske baad yahan <b>Sync now</b> dabao.";
+  el.classList.remove("hidden");
+}
 async function loadLogs() {
   if (!S.cid) return;
+  const c = activeChild();
+  const permOff = c ? (c.permCalls === false || c.permSms === false) : false;
   try {
-    const c = await api("/api/calls/" + S.cid);
-    $("calls-list").innerHTML = (c.calls || []).map((x) =>
-      "<li><span class=\"when\">" + hhmm(x.date) + '</span><div class="t"><span class="tag ' +
-      (x.type === "missed" ? "red" : x.type === "in" ? "green" : "blue") + '">' + esc(x.type) + "</span>" +
-      esc(x.number) + (x.name ? " (" + esc(x.name) + ")" : "") + "</div><div class='d'>" + x.duration + "s</div></li>").join("") ||
-      '<li class="muted">Abhi koi call sync nahi hui. Child connect hone par ~1 min me data aata hai. Uske baad bhi khali hai to bachche ke phone me app kholke Step 7 “Calls & SMS” → Grant karo — permission ke bina sync nahi hota.</li>';
-    const s = await api("/api/sms/" + S.cid);
-    $("sms-list").innerHTML = (s.sms || []).map((x) =>
-      "<li><span class=\"when\">" + hhmm(x.date) + '</span><div class="t">' + esc(x.number) + "</div>" +
+    const cl = await api("/api/calls/" + S.cid);
+    $("calls-list").innerHTML = (cl.calls || []).map((x) => {
+      const ic = x.type === "missed" ? "📵" : x.type === "in" ? "📥" : x.type === "out" ? "📤" : "📞";
+      return "<li><span class=\"when\">" + fmtWhen(x.date) + '</span><div class="t">' + ic +
+        " <b>" + esc(x.number) + "</b>" + (x.name ? " <span class='muted'>(" + esc(x.name) + ")</span>" : "") +
+        "</div><div class='d'>" + esc(x.type) + (x.duration > 0 ? " · " + fmtDur(x.duration) : "") + "</div></li>";
+    }).join("") ||
+      '<li class="muted">' + (permOff
+        ? "Call/SMS permission bachche ke phone par OFF hai — upar ⚠️ wala fix padho, permission allow karne ke baad 'Sync now' dabao."
+        : "Abhi koi call record nahi aaya. Child connect hone par khud sync hota hai — ya 'Sync now' dabao. Naye calls ~1 min me khud aa jate hain.") + '</li>';
+    const sm = await api("/api/sms/" + S.cid);
+    $("sms-list").innerHTML = (sm.sms || []).map((x) =>
+      "<li><span class=\"when\">" + fmtWhen(x.date) + '</span><div class="t"><b>' + esc(x.number) + "</b></div>" +
       "<div class='d'>" + esc(x.body || "") + "</div></li>").join("") ||
-      '<li class="muted">Abhi koi SMS sync nahi hua. Child connect hone par ~1 min me data aata hai. Uske baad bhi khali hai to bachche ke phone me app kholke Step 7 “Calls & SMS” → Grant karo — permission ke bina sync nahi hota.</li>';
+      '<li class="muted">' + (permOff
+        ? "SMS permission bachche ke phone par OFF hai — Step 7 'Calls & SMS' → Allow karo, phir 'Sync now'."
+        : "Abhi koi SMS record nahi aaya. Child connect hone par khud sync hota hai — ya 'Sync now' dabao.") + '</li>';
   } catch (e) {}
 }
+function syncLogsNow() {
+  sendCmd("sync_usage");
+  toast("Bachche ke phone se sync shuru — 3–5 sec me data aa jayega");
+  [3000, 6000, 12000].forEach((ms) => setTimeout(() => { if (!$("tab-report").classList.contains("hidden")) loadLogs(); }, ms));
+}
+$("logs-sync").onclick = syncLogsNow;
 
 /* ---------------- tabs ---------------- */
 $("nav").querySelectorAll("button[data-tab]").forEach((b) => {
@@ -1287,7 +1334,7 @@ $("nav").querySelectorAll("button[data-tab]").forEach((b) => {
     const t = b.dataset.tab;
     if (t === "aaj") { loadRules(); loadAlerts(); }
     if (t === "map") { initMap(); setTimeout(() => S.map && S.map.invalidateSize(), 50); loadLocations(); loadFences(); }
-    if (t === "report") { loadApps(); loadLogs(); }
+    if (t === "report") { loadApps(); loadLogs(); permDiag(); }
     if (t === "set") { loadRules(); renderChildrenList(); }
     if (t === "chat") renderChat();
   };

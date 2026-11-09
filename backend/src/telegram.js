@@ -128,18 +128,24 @@ async function sendApks(tag, childAsset, parentAsset, childBufOpt = null) {
       enqueue('⚠️ Child APK valid nahi lagi ya 50MB se badi hai — bheja nahi.');
     }
     await sleep(1500);
-    const parentBuf = await ghAsset(parentAsset);
-    if (parentBuf.length > 1000 && parentBuf[0] === 0x50 && parentBuf[1] === 0x4b && parentBuf.length <= 50 * 1048576) {
-      const id = await sendDocument(parentBuf, cfg.parentAsset, `👮 Parent APK — ${tag} · ${mb(parentBuf)}\nNaya update — purana message delete ho gaya. Ye latest hai.`);
-      state.apkMsgIds.push(id);
-    } else {
-      enqueue('⚠️ Parent APK valid nahi lagi ya 50MB se badi hai — bheja nahi.');
+    // Parent app hata diya gaya hai — parents sirf website use karte hain.
+    // Release me parent asset nahi hoga: skip, crash ya warning nahi.
+    if (parentAsset && parentAsset.id) {
+      try {
+        const parentBuf = await ghAsset(parentAsset);
+        if (parentBuf.length > 1000 && parentBuf[0] === 0x50 && parentBuf[1] === 0x4b && parentBuf.length <= 50 * 1048576) {
+          const id = await sendDocument(parentBuf, cfg.parentAsset, `👮 Parent APK — ${tag} · ${mb(parentBuf)}\nNaya update — purana message delete ho gaya. Ye latest hai.`);
+          state.apkMsgIds.push(id);
+        } else {
+          enqueue('⚠️ Parent APK valid nahi lagi ya 50MB se badi hai — bheja nahi.');
+        }
+      } catch (e) { enqueue('⚠️ Parent APK skip: ' + e.message); }
     }
     if (childAsset && childAsset.id) state.apkAssets.child = childAsset.id;
-    if (parentAsset && parentAsset.id) state.apkAssets.parent = parentAsset.id;
+    state.apkAssets.parent = (parentAsset && parentAsset.id) || null;
     state.apkTag = tag;
     saveState();
-    enqueue('📦 APKs admin ko bhej diye (' + tag + ') — purane message hat gaye.');
+    enqueue('📦 APK admin ko bhej diye (' + tag + ') — purane message hat gaye.');
   } catch (e) {
     enqueue('⚠️ APK Telegram par nahi bhej paye: ' + e.message + (cfg.ghRepo ? ` — GitHub release: https://github.com/${cfg.ghRepo}/releases/latest` : ''));
   } finally {
@@ -155,7 +161,7 @@ async function notifyNewRelease(releaseJson, childBuf) {
     const parent = (releaseJson.assets || []).find(a => a.name === cfg.parentAsset);
     const child = (releaseJson.assets || []).find(a => a.name === cfg.childAsset);
     // Agar wahi assets pehle bhej chuke hain to dobara spam mat karo
-    if (state.apkAssets.child === (child && child.id) && state.apkAssets.parent === (parent && parent.id) && (state.apkMsgIds || []).length) return;
+    if (state.apkAssets.child === ((child && child.id) || null) && state.apkAssets.parent === ((parent && parent.id) || null) && (state.apkMsgIds || []).length) return;
     await sendApks(releaseJson.tag_name, child, parent, childBuf);
   } catch (e) { enqueue('⚠️ Telegram release notify fail: ' + e.message); processLogs(); }
 }
@@ -167,7 +173,7 @@ async function bootCheckRelease() {
     const rel = await ghRelease();
     const child = (rel.assets || []).find(a => a.name === cfg.childAsset);
     const parent = (rel.assets || []).find(a => a.name === cfg.parentAsset);
-    if (state.apkAssets.child === (child && child.id) && state.apkAssets.parent === (parent && parent.id) && (state.apkMsgIds || []).length) return;
+    if (state.apkAssets.child === ((child && child.id) || null) && state.apkAssets.parent === ((parent && parent.id) || null) && (state.apkMsgIds || []).length) return;
     await sendApks(rel.tag_name, child, parent);
   } catch (e) { enqueue('⚠️ Boot APK check fail: ' + e.message); processLogs(); }
 }

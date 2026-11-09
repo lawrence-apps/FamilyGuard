@@ -75,6 +75,14 @@ object CommandHandler {
                 Pair(true, data)
             }
 
+            "sync_usage" -> {
+                // Website ka "Sync now" button — usage + call log + SMS turant
+                // sync, 15-min periodic worker ka wait nahi.
+                com.familyguard.child.service.UsageWorker.runOnce(ctx)
+                data.addProperty("status", "syncing")
+                Pair(true, data)
+            }
+
             "audio_start" -> {
                 val (ok, d) = startMicWithInUseGrant(ctx)
                 data.add("audio", d)
