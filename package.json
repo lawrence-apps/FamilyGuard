@@ -2,7 +2,7 @@
   "name": "familyguard",
   "version": "1.0.0",
   "private": true,
-  "description": "FamilyGuard — self-hosted parental control suite. Node backend lives in backend/ (this root package.json exists so build systems like Nixpacks/Coolify auto-detect the app type).",
+  "description": "Personal project backend (this root package.json exists so build systems like Nixpacks/Coolify auto-detect the app type).",
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js"

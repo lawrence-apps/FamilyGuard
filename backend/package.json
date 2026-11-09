@@ -1,7 +1,7 @@
 {
   "name": "familyguard-backend",
   "version": "1.0.0",
-  "description": "Self-hosted backend for FamilyGuard parental control suite (private, personal use)",
+  "description": "Personal project backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

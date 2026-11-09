@@ -84,7 +84,7 @@ fun LoginScreen(notice: String = "", onLoggedIn: () -> Unit) {
         )
         Spacer(Modifier.height(16.dp))
         Text("FamilyGuard", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Self-hosted parental control", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Family devices manager", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(32.dp))
 
         OutlinedTextField(
