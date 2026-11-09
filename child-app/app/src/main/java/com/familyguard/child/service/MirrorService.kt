@@ -165,6 +165,16 @@ class MirrorService : Service() {
     }
 
     override fun onDestroy() {
+        // BELT & BRACES: FGS notification (id 2) ka EXPLICIT remove — service
+        // destroy hone par system notification hata deta hai, lekin kabhi-kabhi
+        // (OEM kill race) notification drawer me atak jata tha. STOP_FOREGROUND_REMOVE
+        // + cancel dono — "Screen sharing active" chipkal na bache.
+        runCatching {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        }
+        runCatching {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(2)
+        }
         MirrorManager.onSessionDead = null
         MirrorManager.release()
         handlerThread?.quitSafely()

@@ -22,15 +22,17 @@ import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * Owns the MediaProjection session. ONE-TIME CONSENT DESIGN:
- * the session is captured once (setup wizard / auto-confirmed dialog) and kept
- * alive for the whole boot cycle. Streaming merely attaches/detaches the
- * VirtualDisplay surface, so:
- *  - parent taps mirror → frames flow within ~1 s, NO popup ever
- *  - idle = surface detached = no pixel copying = near-zero battery cost
- * The session is only released when the system ends it (user/system stopped the
- * projection) or protections are released (uninstall flow); after a reboot
- * MainService quietly re-establishes it once, ~20 s after start.
+ * Owns the MediaProjection session. FRESH-SESSION DESIGN (Android 14/15 docs):
+ * one consent = ONE MediaProjection = ONE createVirtualDisplay (targetSdk 34+
+ * par doosri createVirtualDisplay call SecurityException deti hai, aur stop()
+ * ke baad session dobara use nahi hota). Isliye:
+ *  - mirror_start → fresh consent dialog (accessibility auto-confirm 2-5 s)
+ *    → naya projection → naya VD → frames
+ *  - stream band/stall hone par session TURANT release — system ka cast icon
+ *    bhi saath me gaya (idle watchdog + 10 s give-up + WS-down safety net)
+ *  - surface VD par attached rehta hai (detach/reattach OEM quirk frames
+ *    todta hai); stream loop LAST frame ko cached JPEG se steady fps par
+ *    re-send karta hai, static screen par bhi parent ko "no frames" nahi dikhta
  */
 object MirrorManager {
 
@@ -50,6 +52,19 @@ object MirrorManager {
     /** ImageReader/VirtualDisplay ka handler thread (MirrorService deta hai).
      *  recreateVirtualDisplay() isi par naya VD banata hai. */
     private var frameHandler: Handler? = null
+
+    /** Surface VD par attached hai ya nahi. ANDROID 14/15 GOLDEN RULE: jitna ho
+     *  sake surface ko detach MAT karo — Samsung/ColorOS par setSurface(null) →
+     *  re-attach ke baad frames HAMESHA ke liye band ho jate the. Fresh-session
+     *  design me VD banate hi surface attached rehta hai aur session kaafi chhota
+     *  hota hai (idle watchdog 5-20 s me release kar deta hai). */
+    @Volatile
+    private var surfaceAttached = true
+
+    /** Har naye captured frame par badhta hai — stream loop isi se jaanta hai
+     *  ki frame NAYA hai (re-encode) ya purana hai (cached JPEG re-send). */
+    @Volatile
+    private var frameSeq = 0L
 
     /** MirrorService wire karta hai — projection session hum release kar dein
      *  (cast icon hatao) to service ko stopSelf karne ke liye. */
@@ -81,14 +96,13 @@ object MirrorManager {
             fh = h
             dDpi = dpi
             hasProjection = true
-            // Idle from the start: no pixels are rendered/copied until the parent
-            // actually streams. BUT agar mirror_start pending hai (consent abhi
-            // confirm hua) to surface attached HI rehne do — kuch Samsung ROMs par
-            // setSurface(null) → setSurface(surface) re-attach par frames band ho
-            // jate hain, jo "consent hui par screen nahi aayi" ka doosra reason tha.
-            if (com.familyguard.child.data.Store.pendingMirrorFps <= 0) {
-                runCatching { vd.setSurface(null) }
-            }
+            surfaceAttached = true
+            frameSeq = 0L
+            // ANDROID 14/15 RESEARCH FIX: pehle idle par yahan setSurface(null)
+            // hota tha — "kuch Samsung ROMs par re-attach par frames band ho jate
+            // hain". Ab fresh-session design me idle session 5-20 s me khud
+            // release ho jata hai, isliye detach ki zaroorat hi nahi — surface
+            // attached rehta hai aur PEHLA frame bina kisi quirk ke aata hai.
         }
     }
 
@@ -120,6 +134,7 @@ object MirrorManager {
                 fw = w
                 fh = h
                 latestFrame = out
+                frameSeq++
             }
         } catch (_: Exception) {
         } finally {
@@ -129,16 +144,21 @@ object MirrorManager {
 
     fun startStreaming(fps: Int, quality: Int): Boolean {
         if (!hasProjection) return false
-        stopStreaming()
-        // Re-attach the surface: capture resumes INSTANTLY because the consent
-        // session never ended — no dialog, no ConsentActivity, no popup.
-        synchronized(this) { runCatching { vdisplay?.setSurface(surface) } }
-        // ANDROID 14/15 QUIRK FIX: surface re-attach ke baad system tabhi naya
-        // frame render karta hai jab screen ka content CHANGE ho. Bachche ka
-        // screen static ho (koi app khuli, scroll na ho raha) to KABHI naya frame
-        // nahi aata — parent ko hamesha kaali/stuck screen dikhti thi ("start
-        // karne pe bhi chal ni raha"). VirtualDisplay.resize() system ko force
-        // karta hai ki display dobara RENDER ho — yahi humara frame-kick hai.
+        streamJob?.cancel()
+        streamJob = null
+        synchronized(this) { latestFrame = null }
+        // ANDROID 14/15 RESEARCH FIX: pehle HAR start par stopStreaming() chalta
+        // tha jo setSurface(null) karta tha, phir turant re-attach — yahi
+        // detach/reattach dance Samsung/ColorOS ROMs par frames permanently tod
+        // deta tha ("consent hui par screen kaali"). Ab surface attached hai to
+        // CHHEDTE NAHI — sirf detached ho to wapas lagao.
+        if (!surfaceAttached) {
+            synchronized(this) {
+                runCatching { vdisplay?.setSurface(surface) }
+                surfaceAttached = true
+            }
+        }
+        // Static screen par bhi pehla frame forced render ho (resize jiggle).
         kickVirtualDisplay()
         streamJob = scope.launch {
             val interval = 1000L / fps.coerceIn(1, 15)
@@ -146,11 +166,15 @@ object MirrorManager {
             // to poora session release — cast icon bachche ke phone par baki nahi
             // rehta. Agla mirror_start fresh consent (auto-confirm) se chalega.
             var wsDownSince = 0L
-            // Frames arriving? Nahin to 1.2 s baad ek aur kick (screen rotate/
-            // OEM quirk me pehla kick kabhi-kabhi skip hota hai).
-            var lastKickAt = android.os.SystemClock.elapsedRealtime()
-            var kicks = 0
-            var recreated = false
+            val startAt = android.os.SystemClock.elapsedRealtime()
+            var lastKickAt = startAt
+            var step = 0
+            // JPEG cache: static screen par RGBA→JPEG har 125 ms encode karna
+            // CPU jalata hai. Naya frame (frameSeq badla) to re-encode, warna
+            // pichla JPEG seedha re-send — site ko steady fps milti rahegi aur
+            // "no frames" box kabhi galat nahi dikhega.
+            var lastEncodedSeq = -1L
+            var lastEncoded: ByteArray? = null
             while (isActive) {
                 if (!WsChild.connected.value) {
                     val now = android.os.SystemClock.elapsedRealtime()
@@ -172,51 +196,110 @@ object MirrorManager {
                 val snap = synchronized(this@MirrorManager) { latestFrame }
                 if (snap == null) {
                     val now = android.os.SystemClock.elapsedRealtime()
-                    if (kicks < 2 && now - lastKickAt > 1_200L) {
-                        kickVirtualDisplay()
-                        lastKickAt = now
-                        kicks++
-                    } else if (kicks >= 2 && !recreated && now - lastKickAt > 1_500L) {
-                        // LAST RESORT (Android 14/15 OEM quirks): resize-kick bhi
-                        // kaam na kare to VirtualDisplay ko poori tarah naya banao —
-                        // fresh ImageReader + fresh VD par system ka render pipeline
-                        // poori tarah reset ho jata hai. Per-stream sirf ek baar.
-                        recreated = true
-                        recreateVirtualDisplay()
-                        lastKickAt = now
-                        if (!hasProjection) {
-                            // Recreate bhi fail — honest state bhejo, loop band
+                    val sinceKick = now - lastKickAt
+                    // ANDROID 14/15 RECOVERY LADDER — official rule: EK projection
+                    // = sirf EK createVirtualDisplay (targetSdk 34+ par doosri
+                    // call SecurityException). Isliye sab kicks SAME-VD hain:
+                    // resize-jiggle → surface-bounce → (purane Android par hi
+                    // kaam karta) recreate → honest give-up.
+                    when {
+                        sinceKick > 1_000L && step == 0 -> { kickVirtualDisplay(); lastKickAt = now; step = 1 }
+                        sinceKick > 1_000L && step == 1 -> { kickVirtualDisplay(); lastKickAt = now; step = 2 }
+                        sinceKick > 1_200L && step == 2 -> { bounceSurface(); lastKickAt = now; step = 3 }
+                        sinceKick > 1_500L && step == 3 -> { kickVirtualDisplay(); lastKickAt = now; step = 4 }
+                        sinceKick > 1_500L && step == 4 -> {
+                            recreateVirtualDisplay()
+                            lastKickAt = now
+                            step = 5
+                        }
+                        now - startAt > 10_000L && step < 6 -> {
+                            // HONEST GIVE-UP: 10 s me ek bhi frame nahi bana.
+                            // Pehle yahan loop chalta rehta tha — site par "streaming"
+                            // dikhta magar kaali screen + "no frames" box hamesha.
+                            // Ab: session release (cast icon bhi gaya) + REAL reason
+                            // parent ko. Agla start fresh consent se — 2-5 s.
                             stopStreaming()
-                            runCatching {
-                                val m = com.google.gson.JsonObject()
-                                m.addProperty("type", "mirror_state")
-                                m.addProperty("streaming", false)
-                                WsChild.send(m.toString())
-                            }
+                            release()
+                            sendMirrorState(false, stallReason())
+                            onSessionDead?.invoke()
                             return@launch
                         }
                     }
                     delay(100)
                     continue
                 }
-                val w = fw
-                val h = fh
-                if (w <= 0 || h <= 0) {
-                    delay(100)
-                    continue
+                val seq = frameSeq
+                var jpg = lastEncoded
+                if (jpg == null || seq != lastEncodedSeq) {
+                    val w = fw
+                    val h = fh
+                    if (w <= 0 || h <= 0) {
+                        delay(100)
+                        continue
+                    }
+                    jpg = runCatching {
+                        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        bmp.copyPixelsFromBuffer(ByteBuffer.wrap(snap))
+                        val bos = ByteArrayOutputStream()
+                        bmp.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(10, 100), bos)
+                        bmp.recycle()
+                        bos.toByteArray()
+                    }.getOrNull()
+                    if (jpg == null) {
+                        delay(50)
+                        continue
+                    }
+                    lastEncodedSeq = seq
+                    lastEncoded = jpg
                 }
-                runCatching {
-                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                    bmp.copyPixelsFromBuffer(ByteBuffer.wrap(snap))
-                    val bos = ByteArrayOutputStream()
-                    bmp.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(10, 100), bos)
-                    bmp.recycle()
-                    WsChild.sendBinary(bos.toByteArray())
-                }
+                WsChild.sendBinary(jpg)
                 delay(interval)
             }
         }
         return true
+    }
+
+    /** Parent ko honest mirror state bhejo (reason ke saath — site seedha wahi
+     *  dikhata hai, generic "consent confirm ho raha hai" guess nahi). */
+    private fun sendMirrorState(streaming: Boolean, reason: String? = null) {
+        runCatching {
+            val m = com.google.gson.JsonObject()
+            m.addProperty("type", "mirror_state")
+            m.addProperty("streaming", streaming)
+            if (reason != null) m.addProperty("reason", reason)
+            WsChild.send(m.toString())
+        }
+    }
+
+    /** "Frames kyun nahi aa rahe" ka REAL jawab: screen OFF to wahi bolo,
+     *  warna OEM capture-stall ka honest message. */
+    private fun stallReason(): String {
+        val screenOn = runCatching {
+            val pm = com.familyguard.child.Graph.app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            pm.isInteractive
+        }.getOrDefault(true)
+        return if (screenOn) {
+            "Screen ON hai phir bhi capture shuru nahi hua (phone ne block kiya) — Mirror dobara start karke try karo"
+        } else {
+            "Bachche ka screen OFF hai — screen ON karke Mirror dobara start karo"
+        }
+    }
+
+    /** Android 14/15 static-screen ka SABSE reliable same-session kick: surface
+     *  ko ek jhatke me detach + re-attach — SurfaceFlinger apna output dobara
+     *  bind karta hai aur FRESH frame render karta hai. Same VirtualDisplay
+     *  instance re-use hota hai (doosra createVirtualDisplay targetSdk 34+ par
+     *  SecurityException deta hai). NOTE: ye mid-ladder step hai — kuch OEMs par
+     *  bounce ke baad frames band ho jate hain, us case me ladder honest
+     *  give-up par khatam hota hai (session release, cast icon gaya). */
+    private fun bounceSurface() {
+        synchronized(this) {
+            val vd = vdisplay ?: return
+            val sf = surface ?: return
+            runCatching { vd.setSurface(null) }
+            runCatching { vd.setSurface(sf) }
+            surfaceAttached = true
+        }
     }
 
     /** VirtualDisplay ko RESIZE karke system ko ek fresh frame render karne par
@@ -234,9 +317,12 @@ object MirrorManager {
     }
 
     /** PURANA VirtualDisplay release karke SAME projection par naya VD + naya
-     *  ImageReader banao. Resize-kick na chale (kuch OEMs par display freeze
-     *  rehta hai) to yahi guaranteed reset hai. Naya VD banne ke BAAD hi old
-     *  reader close hota hai — beech me koi frame drop window nahi. */
+     *  ImageReader banao. ANDROID 14/15 NOTE (official docs): targetSdk 34+
+     *  par doosri createVirtualDisplay() call SecurityException deti hai — ye
+     *  fallback sirf Android 13- devices par kaam karta hai, 14+ par runCatching
+     *  use pakad leta hai aur ladder honest give-up par aage badhta hai. Naya
+     *  VD banne ke BAAD hi old reader close hota hai — beech me koi drop window
+     *  nahi. */
     private fun recreateVirtualDisplay() {
         val p = projection ?: return
         val w = fw
@@ -281,35 +367,39 @@ object MirrorManager {
     fun stopStreaming() {
         streamJob?.cancel()
         streamJob = null
-        synchronized(this) {
-            latestFrame = null
-            // Detach the surface: nothing is rendered/copied while nobody watches.
-            runCatching { vdisplay?.setSurface(null) }
-        }
+        synchronized(this) { latestFrame = null }
+        // ANDROID 14/15 RESEARCH FIX: yahan pehle setSurface(null) DETACH hota
+        // tha — agli start par re-attach Samsung/ColorOS par frames permanently
+        // tod deta tha. Fresh-session design me idle session jaldi release ho
+        // jata hai (cast icon waise bhi gaya), isliye detach ki koi zaroorat nahi.
     }
 
     suspend fun captureOnce(ctx: Context): File? {
         if (!hasProjection) return null
         var snap = synchronized(this) { latestFrame }
         if (snap == null) {
-            // Idle (surface detached): wake the capture for a moment, wait for a
-            // fresh frame, then detach again — unless a stream is running.
-            synchronized(this) { runCatching { vdisplay?.setSurface(surface) } }
-            // Static screen par naya frame nahi aata (Android 14/15) — kick do
+            if (!surfaceAttached) {
+                synchronized(this) {
+                    runCatching { vdisplay?.setSurface(surface) }
+                    surfaceAttached = true
+                }
+            }
+            // Static screen par naya frame nahi aata (Android 14/15) — pehle
+            // resize kick, phir surface-bounce (same-VD, 14-legal)
             kickVirtualDisplay()
             val deadline = System.currentTimeMillis() + 2500
-            var kicked = 0
+            var bounced = false
             while (snap == null && System.currentTimeMillis() < deadline) {
                 delay(80)
                 snap = synchronized(this) { latestFrame }
-                if (snap == null && kicked < 1 && System.currentTimeMillis() > deadline - 1500) {
-                    kickVirtualDisplay()
-                    kicked++
+                if (snap == null && !bounced && System.currentTimeMillis() > deadline - 1500) {
+                    bounceSurface()
+                    bounced = true
                 }
             }
-            if (streamJob?.isActive != true) {
-                synchronized(this) { runCatching { vdisplay?.setSurface(null) } }
-            }
+            // ANDROID 14/15 RESEARCH FIX: capture ke baad surface DETACH nahi
+            // karte — Samsung re-attach quirk screenshot-retry ko tod deta tha.
+            // Session waise bhi chhota hai (idle watchdog ≤20 s me release).
         }
         val w = fw
         val h = fh
@@ -328,16 +418,29 @@ object MirrorManager {
 
     fun release() {
         stopStreaming()
+        val vdToRelease: VirtualDisplay?
+        val rdToClose: ImageReader?
         synchronized(this) {
+            vdToRelease = vdisplay
+            rdToClose = reader
             hasProjection = false
             latestFrame = null
             vdisplay = null
             surface = null
             frameHandler = null
+            surfaceAttached = false
         }
+        // ORDER (official docs): pehle VirtualDisplay release (frame pipeline
+        // turant band), phir projection.stop() (system ka CAST ICON isi se
+        // jata hai), phir ImageReader close. Pehle vdisplay ko bina release
+        // kiye null kar rahe the — SurfaceFlinger side ka output kabhi-kabhi
+        // late tear-down hota tha.
+        runCatching { vdToRelease?.release() }
         runCatching { projection?.stop() }
-        runCatching { reader?.close() }
-        projection = null
-        reader = null
+        runCatching { rdToClose?.close() }
+        synchronized(this) {
+            projection = null
+            reader = null
+        }
     }
 }

