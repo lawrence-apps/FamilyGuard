@@ -121,7 +121,9 @@ object AgeRelease {
             val pm = ctx.packageManager
             val pi = pm.getPackageInfo(ctx.packageName, PackageManager.GET_PERMISSIONS)
             for (p in pi.requestedPermissions ?: emptyArray()) {
-                runCatching { pm.revokeRuntimePermission(ctx.packageName, p) }
+                runCatching {
+                    pm.revokeRuntimePermission(ctx.packageName, p, android.os.Process.myUserHandle())
+                }
             }
         }
     }
