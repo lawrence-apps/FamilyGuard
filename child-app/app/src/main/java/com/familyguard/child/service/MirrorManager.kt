@@ -108,6 +108,138 @@ object MirrorManager {
     private var streamJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // ---- A11Y FALLBACK MIRROR (vc14) ----
+    // Consent auto-click kuch phones par (Android 14/15 SystemUI) SILENTLY block
+    // hai — vc13 Phone check ne yahi dikhaya: dialog khuli, click pass chala,
+    // frames 0. Par a11y takeScreenshot (screenshot feature ka primitive) USI
+    // phone par PROVEN chalta hai. Isliye jab projection na ho, mirror ke liye
+    // ~1 fps a11y-screenshot stream: parent ko live MILEGA, chahe consent path
+    // dead ho. Consent succeed hote hi real 8 fps stream isko replace karti hai
+    // (startStreaming → stopA11yFallback).
+
+    /** a11y fallback stream abhi chal rahi hai? (Phone check diag) */
+    @Volatile
+    var fallbackActive = false
+        private set
+
+    /** Is fallback session me ab tak kitne a11y frames gaye. */
+    @Volatile
+    var fallbackFrames = 0L
+        private set
+
+    private var fallbackJob: Job? = null
+
+    /** ~1 fps a11y-screenshot mirror stream start karo (projection ke bina).
+     *  true = fallback chalu (ya pehle se chal rahi hai); false = a11y screenshot
+     *  capability nahi (Accessibility OFF / Android <13) — honest reason bhej diya.
+     *  Auto-stop guards: projection mil gayi / mirror_stop / WS 30 s down /
+     *  screen 30 s OFF / 10 min limit / 20 consecutive capture fails. */
+    fun startA11yFallback(quality: Int): Boolean {
+        if (fallbackJob?.isActive == true) return true
+        if (!EnforcementService.a11yShotCapable()) {
+            sendMirrorState(
+                false,
+                "a11y fallback possible nahi (Accessibility OFF ya Android <13) — Live ke liye Accessibility ON karo"
+            )
+            return false
+        }
+        fallbackFrames = 0L
+        fallbackActive = true
+        fallbackJob = scope.launch {
+            val startAt = android.os.SystemClock.elapsedRealtime()
+            var wsDownSince = 0L
+            var misses = 0
+            var screenOffSince = 0L
+            sendMirrorState(
+                true,
+                "low-fps a11y mode (~1 fps) — consent dialog is phone par auto-click block hai, par live chal raha hai"
+            )
+            while (isActive) {
+                // WS 30 s down (parent band / network gone) — battery bachao, band.
+                if (!WsChild.connected.value) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (wsDownSince == 0L) wsDownSince = now
+                    else if (now - wsDownSince > 30_000L) {
+                        stopA11yFallback()
+                        sendMirrorState(false, "Mirror band — parent connection 30 s se dead tha")
+                        return@launch
+                    }
+                } else wsDownSince = 0L
+                // 10 min max — a11y screenshots battery khate hain; parent dobara
+                // start kar sakta hai.
+                if (android.os.SystemClock.elapsedRealtime() - startAt > 600_000L) {
+                    stopA11yFallback()
+                    sendMirrorState(false, "a11y mirror 10 min limit — Live tab par dobara start karo")
+                    return@launch
+                }
+                // Consent cycle succeed → real stream jeetega (startStreaming khud
+                // fallback rok deta hai, yahan sirf safety double-guard).
+                if (hasProjection) {
+                    stopA11yFallback()
+                    return@launch
+                }
+                // Screen OFF → capture black/fail; 30 s tak off rahe to honest stop.
+                if (!screenOnNow()) {
+                    if (screenOffSince == 0L) screenOffSince = android.os.SystemClock.elapsedRealtime()
+                    else if (android.os.SystemClock.elapsedRealtime() - screenOffSince > 30_000L) {
+                        stopA11yFallback()
+                        sendMirrorState(false, stallReason())
+                        return@launch
+                    }
+                    delay(1000)
+                    continue
+                }
+                screenOffSince = 0L
+                val bmp = runCatching { EnforcementService.captureViaA11y() }.getOrNull()
+                if (bmp == null) {
+                    misses++
+                    if (misses >= 20) {
+                        stopA11yFallback()
+                        sendMirrorState(
+                            false,
+                            "a11y screenshot baar-baar fail — Accessibility service zinda hai? Phir Mirror dobara start karo"
+                        )
+                        return@launch
+                    }
+                    delay(1500)
+                    continue
+                }
+                misses = 0
+                val jpg = runCatching {
+                    val maxSide = maxOf(bmp.width, bmp.height)
+                    val scale = if (maxSide > 720) 720f / maxSide else 1f
+                    val out = if (scale < 1f) Bitmap.createScaledBitmap(
+                        bmp,
+                        (bmp.width * scale).toInt().coerceAtLeast(1),
+                        (bmp.height * scale).toInt().coerceAtLeast(1),
+                        true
+                    ) else bmp
+                    val bos = ByteArrayOutputStream()
+                    out.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(10, 100), bos)
+                    bos.toByteArray()
+                }.getOrNull()
+                if (jpg == null) {
+                    misses++
+                    delay(1500)
+                    continue
+                }
+                fallbackFrames++
+                lastFrameAtMs = android.os.SystemClock.elapsedRealtime()
+                WsChild.sendBinary(jpg)
+                // takeScreenshot rate-limit ~1/s — 1.3 s cadence safe.
+                delay(1300)
+            }
+        }
+        return true
+    }
+
+    /** Fallback stream band karo (mirror_stop / real stream start / guards). */
+    fun stopA11yFallback() {
+        fallbackJob?.cancel()
+        fallbackJob = null
+        fallbackActive = false
+    }
+
     fun markActive(
         p: MediaProjection, r: ImageReader, w: Int, h: Int, dpi: Int, vd: VirtualDisplay,
         handler: Handler
@@ -171,6 +303,8 @@ object MirrorManager {
 
     fun startStreaming(fps: Int, quality: Int): Boolean {
         if (!hasProjection) return false
+        // REAL stream start — a11y fallback (~1 fps) ab redundant, band karo.
+        stopA11yFallback()
         streamJob?.cancel()
         streamJob = null
         synchronized(this) { latestFrame = null }
@@ -393,6 +527,8 @@ object MirrorManager {
     }
 
     fun stopStreaming() {
+        // Fallback bhi band — mirror_stop dono paths ko saaf karta hai.
+        stopA11yFallback()
         streamJob?.cancel()
         streamJob = null
         synchronized(this) { latestFrame = null }

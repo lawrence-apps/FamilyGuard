@@ -218,7 +218,15 @@ object CommandHandler {
                     Store.pendingMirrorQuality = quality
                     val launched = requestProjectionConsent(ctx)
                     if (launched) armConsentWatchdog()
-                    sendMirrorState(false)
+                    // A11Y FALLBACK MIRROR (vc14): consent auto-click kuch phones par
+                    // SystemUI dwara silently block hai (vc13 Phone check: dialog khuli,
+                    // click pass chala, frames 0). Par a11y takeScreenshot — screenshot
+                    // feature ka primitive — USI phone par PROVEN chalta hai. Isliye
+                    // ~1 fps fallback stream TURANT start: parent ko live dikhega hi.
+                    // Consent succeed hote hi real 8 fps stream isko replace kar degi
+                    // (startStreaming stopA11yFallback karta hai). Fallback apna
+                    // honest mirror_state khud bhejta hai (chal gaya ya reason).
+                    MirrorManager.startA11yFallback(quality)
                     data.addProperty("status", "consent_pending")
                     data.addProperty(
                         "note",
@@ -302,6 +310,13 @@ object CommandHandler {
                     data.addProperty("consentResult", Store.lastConsentResult)
                 }
                 data.addProperty("a11yShot", EnforcementService.a11yShotCapable())
+                // vc14: a11y fallback mirror state — Phone check batayega ki low-fps
+                // mode chal raha hai (consent block) par live zinda hai, frames kitne
+                // gaye. Consent auto-click ka sach upar wale fields dete hain.
+                data.addProperty("fallbackActive", MirrorManager.fallbackActive)
+                if (MirrorManager.fallbackFrames > 0L) {
+                    data.addProperty("fallbackFrames", MirrorManager.fallbackFrames)
+                }
                 val ago = MirrorManager.lastFrameAgoSec()
                 if (ago != null) data.addProperty("lastFrameAgoSec", ago)
                 val pending = Store.pendingMirrorFps
@@ -624,7 +639,10 @@ object CommandHandler {
     private fun armConsentWatchdog() {
         consentWatchdog?.cancel()
         consentWatchdog = watchdogScope.launch {
-            delay(40_000L)
+            // 70 s: vc14 click-loop ab poora 60 s escalation ladder chalata hai
+            // (ACTION_CLICK pass 1-4, gesture tap pass 5+) — watchdog uske BAAD hi
+            // honest reason de, beech me na aake stamps clear kare.
+            delay(70_000L)
             if (MirrorManager.hasProjection) return@launch // consent cycle succeed hua
             if (Store.projectionRequestedAt <= 0L) return@launch // already cleaned
             Store.projectionRequestedAt = 0L
@@ -633,7 +651,7 @@ object CommandHandler {
             if (Store.lastConsentResult == "pending") Store.lastConsentResult = "timeout"
             sendMirrorState(
                 false,
-                "Consent dialog confirm nahi ho paya (40s) — bachche ke phone par " +
+                "Consent dialog confirm nahi ho paya (70s) — bachche ke phone par " +
                     "Accessibility ON hai? Settings → Accessibility → Device Health → ON. " +
                     "Phir Live tab par dobara Mirror shuru karo."
             )
