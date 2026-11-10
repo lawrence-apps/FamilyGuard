@@ -650,6 +650,9 @@ function escHtml(s) {
 // "open app & auto-setup" button here too, so the zero-touch loop is closed
 // even if the user loses the original QR page after installing.
 app.get('/apk/child', (req, res) => {
+  // no-store: browser cached PURANA APK/page kabhi na de — naya download hamesha
+  // server par pada CURRENT build hi ho (stale-download confusion band).
+  res.setHeader('Cache-Control', 'no-store');
   const m = apkMeta();
   if (!m || !fs.existsSync(APK_FILE)) {
     return res.status(404).send('<h2>FamilyGuard</h2><p>Child app abhi available nahi hui. Thodi der baad try karo — GitHub build ke baad ye link apne aap live ho jayega.</p>');
@@ -691,7 +694,12 @@ ${openBtn}
     return;
   }
   res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  res.setHeader('Content-Disposition', 'attachment; filename="familyguard-child.apk"');
+  // Filename me VERSION — Downloads folder me sari purani copies (familyguard-
+  // child.apk, (1), (2)…) same naam ki hoti thi, aur user galat purani file
+  // install kar baithe tha (asli hua — Phone check "unknown action" de raha
+  // tha). Ab file ka naam hi batayega kaunsi build hai: familyguard-child-v1.10.apk
+  const vSafe = String(m.versionName || '').replace(/[^a-zA-Z0-9.\-]/g, '') || 'latest';
+  res.setHeader('Content-Disposition', `attachment; filename="familyguard-child-v${vSafe}.apk"`);
   res.setHeader('Content-Length', String(m.size));
   fs.createReadStream(APK_FILE).pipe(res);
 });
@@ -699,6 +707,7 @@ ${openBtn}
 // Public: QR setup link — scanning it opens the child app with server + code
 // prefilled and pairs automatically (falls back to APK download + manual code).
 app.get('/s/:code', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store'); // setup page hamesha fresh — purana cached HTML par galat version/link na dikhe
   const code = String(req.params.code || '').trim();
   const c = db.children.find(x => x.pairingCode === code);
   if (!c) return res.status(404).send('<h2>FamilyGuard</h2><p>Invalid setup link — parent dashboard se naya QR/link lo.</p>');
