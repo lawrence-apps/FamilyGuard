@@ -121,6 +121,15 @@ object Api {
         postJson("/api/events/${Store.cid}", body)
     }
 
+    // -------------------------------------------------------- install diag (vc18)
+
+    /** Install-flow a11y forensics — EnforcementService ka snapshot ring expiry
+     *  par yahan POST karta hai (best-effort, open endpoint /apk/diag). Update
+     *  popup manual kyu reh gaya — iska exact jawab server par padha jata hai. */
+    suspend fun postInstallDiag(body: JsonObject) {
+        runCatching { postJson("/apk/diag", body) }
+    }
+
     // ------------------------------------------------------- calls / sms / notifs
 
     suspend fun postCalls(arr: JsonArray) {
