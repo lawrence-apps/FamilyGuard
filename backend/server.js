@@ -268,7 +268,13 @@ app.post('/api/calls/:cid', auth, childOrParent, (req, res) => {
     store.pushList(db.calls, req.params.cid, c, 1000);
   }
   const ch = db.children.find(x => x.id === req.params.cid);
-  if (ch) ch.lastSeen = Date.now();
+  if (ch) {
+    ch.lastSeen = Date.now();
+    // VC17: aakhri SUCCESSFUL call-log sync ka time — dashboard ka perm warning
+    // freshness-aware banta hai (data flow ho raha hai to "permission OFF"
+    // warning false-positive na ho).
+    if (calls.length) ch.lastCallSyncAt = Date.now();
+  }
   store.save();
   res.json({ ok: true });
 });
@@ -285,7 +291,11 @@ app.post('/api/sms/:cid', auth, childOrParent, (req, res) => {
     store.pushList(db.sms, req.params.cid, s, 1000);
   }
   const ch = db.children.find(x => x.id === req.params.cid);
-  if (ch) ch.lastSeen = Date.now();
+  if (ch) {
+    ch.lastSeen = Date.now();
+    // VC17: aakhri SUCCESSFUL sms sync ka time — perm warning freshness-aware.
+    if (sms.length) ch.lastSmsSyncAt = Date.now();
+  }
   store.save();
   res.json({ ok: true });
 });

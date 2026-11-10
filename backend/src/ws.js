@@ -50,6 +50,8 @@ function publicChild(c) {
     deviceName: c.deviceName || '', model: c.model || '', currentApp: c.currentApp || '',
     // Call/SMS permission flags — website Report tab par exact diag ke liye
     permCalls: !!c.permCalls, permSms: !!c.permSms,
+    // VC17: aakhri successful calls/sms sync times — perm warning freshness-aware
+    lastCallSyncAt: c.lastCallSyncAt || 0, lastSmsSyncAt: c.lastSmsSyncAt || 0,
     health: c.health || null,
     // Aakhri update_apk ka honest result (ws.js command_result se)
     lastUpdateResult: c.lastUpdateResult || null
@@ -115,7 +117,7 @@ function handleChildMessage(cid, msg, raw) {
       if (typeof msg.permSms === 'boolean') c.permSms = msg.permSms;
       if (msg.health && typeof msg.health === 'object' && !Array.isArray(msg.health)) c.health = msg.health;
       store.save();
-      broadcastToParents({ type: 'child_status', cid, online: true, battery: c.battery, charging: c.charging, currentApp: c.currentApp, permCalls: c.permCalls, permSms: c.permSms, health: c.health || null, lastSeen: c.lastSeen });
+      broadcastToParents({ type: 'child_status', cid, online: true, battery: c.battery, charging: c.charging, currentApp: c.currentApp, permCalls: c.permCalls, permSms: c.permSms, lastCallSyncAt: c.lastCallSyncAt || 0, lastSmsSyncAt: c.lastSmsSyncAt || 0, health: c.health || null, lastSeen: c.lastSeen });
       break;
     }
     case 'location': {

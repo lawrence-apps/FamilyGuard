@@ -201,6 +201,18 @@ object Store {
     @Volatile
     var pokeMicPermAt: Long = 0L
 
+    /** System.currentTimeMillis() — pichhli baar CallsPermActivity background me
+     *  launch hui (sync_usage par READ_CALL_LOG/READ_SMS missing mila). 10 min
+     *  throttle — warna har sync par permission dialog spam hota. */
+    @Volatile
+    var lastCallsPermReqAt: Long = 0L
+
+    /** System.currentTimeMillis() — pichhli Play Protect auto-OFF attempt
+     *  (SelfHeal one-shot). 24h retry throttle — toggle na nikle to agli din
+     *  phir koshish, har watchdog cycle par settings screen flash nahi. */
+    @Volatile
+    var protectAttemptAt: Long = 0L
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }

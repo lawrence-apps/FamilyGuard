@@ -11,8 +11,8 @@
 // consent auto-click ab SAARI a11y windows scan karta hai + honest diag
 // (clickPassRuns/SawBtn/dialogPkg/consentResult) se Phone check exact batata hai
 // ki Live ke liye child par "Start now" manually dabana hai ya nahi.
-const LATEST_VC = 16;
-const LATEST_V = "1.15";
+const LATEST_VC = 17;
+const LATEST_V = "1.16";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -645,6 +645,8 @@ function handleWs(m) {
         if (m.health) c.health = m.health;
         if (typeof m.permCalls === "boolean") c.permCalls = m.permCalls;
         if (typeof m.permSms === "boolean") c.permSms = m.permSms;
+        if (m.lastCallSyncAt) c.lastCallSyncAt = m.lastCallSyncAt;
+        if (m.lastSmsSyncAt) c.lastSmsSyncAt = m.lastSmsSyncAt;
       }
       // Mirroring ke beech child offline ho gaya to UI stuck na rahe
       if (m.online === false && m.cid === S.cid) {
@@ -1730,9 +1732,15 @@ function permDiag() {
   const el = $("perm-diag");
   if (!el) return;
   if (!c || !c.online) { el.classList.add("hidden"); return; }
+  // VC17 FRESHNESS-AWARE: perm flag false ho, par us source ka data ABHI AA RAHA
+  // hai (aakhri successful sync 24h ke andar) to warning MAT dikhao — warna
+  // "SMS permission OFF" banner dikhta rahta hai jabki call log/SMS saaf chal
+  // rahe hote hain (purana data + sync flow dono dikh raha hota hai).
+  const FRESH_MS = 24 * 3600 * 1000;
+  const flowing = (t) => t && (Date.now() - t) < FRESH_MS;
   const missing = [];
-  if (c.permCalls === false) missing.push("Call log");
-  if (c.permSms === false) missing.push("SMS");
+  if (c.permCalls === false && !flowing(c.lastCallSyncAt)) missing.push("Call log");
+  if (c.permSms === false && !flowing(c.lastSmsSyncAt)) missing.push("SMS");
   if (!missing.length) { el.classList.add("hidden"); return; }
   el.innerHTML = "⚠️ Bachche ke phone par <b>" + missing.join(" + ") +
     " permission OFF</b> hai — isliye ye data sync nahi hota (Android 14/15 OEMs ye permission khud bhi block kar dete hain). " +

