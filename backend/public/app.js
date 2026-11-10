@@ -11,8 +11,8 @@
 // consent auto-click ab SAARI a11y windows scan karta hai + honest diag
 // (clickPassRuns/SawBtn/dialogPkg/consentResult) se Phone check exact batata hai
 // ki Live ke liye child par "Start now" manually dabana hai ya nahi.
-const LATEST_VC = 15;
-const LATEST_V = "1.14";
+const LATEST_VC = 16;
+const LATEST_V = "1.15";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",

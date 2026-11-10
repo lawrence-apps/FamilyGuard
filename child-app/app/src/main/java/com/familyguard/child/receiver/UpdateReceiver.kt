@@ -43,6 +43,12 @@ class UpdateReceiver : BroadcastReceiver() {
                 notifyServer(context, "updated ✓ build $vc")
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                // VC16: click window YAHAN BHI re-arm — commit ke baad koi wizard
+                // step / doosri command autoClickStep overwrite kar de ya commit
+                // ke waqt ki window guzar gayi ho, to bhi dialog ke saath a11y
+                // click 120 s FRESH armed rahega (warna popup phir manual).
+                Store.autoClickStep = "install"
+                Store.autoClickUntil = android.os.SystemClock.elapsedRealtime() + 120_000L
                 // System ka install-confirm intent start karo — YEHI wo dialog
                 // hai jo purane build me kabhi khulta hi nahi tha.
                 val confirm: Intent? = if (Build.VERSION.SDK_INT >= 33)

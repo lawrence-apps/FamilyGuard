@@ -316,7 +316,20 @@ class EnforcementService : AccessibilityService() {
             // click kabhi nahi hota.
             "com.google.android.packageinstaller",
             "com.miui.packageinstaller", "com.miui.securitycenter",
-            "com.samsung.android.packageinstaller"
+            "com.samsung.android.packageinstaller",
+            // VC16: Play Protect scan dialog ("Unknown app… Install anyway") GMS
+            // host karta hai — wo PEHLA dialog ho to click-loop start hi nahi hota
+            // tha aur popup manual reh jati thi. Exact-label matching neeche safe
+            // rakhta hai — GMS window me sirf install-flow ke labels click honge.
+            "com.google.android.gms"
+        )
+
+        /** Install success screen ("App installed" — Done/Open) hosts. Sirf in
+         *  windows par "Done" click hota hai (clickInstallDone). */
+        val INSTALL_DONE_PKGS = setOf(
+            "com.android.packageinstaller", "com.google.android.packageinstaller",
+            "com.google.android.permissioncontroller", "com.android.permissioncontroller",
+            "com.miui.packageinstaller", "com.samsung.android.packageinstaller"
         )
 
         /** Packages that may host the MediaProjection consent dialog. */
@@ -362,13 +375,18 @@ class EnforcementService : AccessibilityService() {
                 "确定", "卸载", "仍然卸载"
             ),
             // Silent self-update: child app naya APK install karta hai — system
-            // install confirm par khud "Install" click ho jata hai. MIUI/ColorOS
-            // apne beech me "Continue" screen bhi dikhaate hain — wahi bhi
-            // cover karo (dialog linkUpdateReceiver se khulta hai).
+            // install confirm par khud click ho jata hai. VC16 FIX: EXISTING app
+            // ke upar install = UPDATE dialog, button "Install" NAHI "Update"
+            // hota hai (AOSP/Google/Samsung sab; title "Do you want to install an
+            // update…"). Bina "update" label ke a11y match kabhi hit nahi hota tha
+            // => popup screen par khadi rehti thi, bachcha/parent manually click
+            // karta tha. MIUI/ColorOS beech me "Continue" screen bhi dikhaate hain.
             "install" to setOf(
-                "install", "install anyway", "continue", "continue install",
+                "install", "install anyway", "update", "update anyway",
+                "continue", "continue install",
                 "इंस्टॉल करें", "इंस्टॉल करें।", "जारी रखें",
-                "安装", "仍然安装", "继续安装"
+                "अपडेट करें", "अपडेट", "फिर भी इंस्टॉल करें", "फिर भी अपडेट करें",
+                "安装", "仍然安装", "继续安装", "更新", "仍然更新"
             )
         )
     }
@@ -603,6 +621,10 @@ class EnforcementService : AccessibilityService() {
             "overlay" -> clickFirstUncheckedToggle()
             // Install-unknown-apps screen: per-app toggle list — humari row flip karo
             "unknown" -> clickAppRowToggle()
+            // VC16: "Update"/"Install" ke alawa install-complete screen ka "Done"
+            // bhi khud click — zero-touch finish (warna "App installed" screen
+            // bachche ke phone par khadi reh jaati hai).
+            "install" -> clickExact(step) || clickInstallDone()
             else -> clickExact(step)
         }
     }
@@ -644,8 +666,30 @@ class EnforcementService : AccessibilityService() {
 
     /** Click an exact-label button (Allow / Activate / …) on the current window. */
     private fun clickExact(step: String): Boolean {
-        val root = rootInActiveWindow ?: return false
         val wanted = ALLOW_EXACT[step] ?: return false
+        // VC16 MULTI-WINDOW PASS — mirror consent fix (vc13) ka proven pattern ab
+        // install/uninstall/permission dialogs par bhi: dialog window kuch ROMs
+        // par ACTIVE window NAHI hoti (foreground app ki window active rehti hai
+        // / dialog apni alag window me render hota hai) — rootInActiveWindow scan
+        // button kabhi dhoond hi nahi pata tha. Ab saari a11y windows scan hoti
+        // hain, package sirf system hosts tak gated — koi random app par matching
+        // label click kabhi nahi hogi.
+        runCatching {
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let { roots.add(it) }
+            windows?.forEach { w -> runCatching { w.root?.let { r -> roots.add(r) } } }
+            for (root in roots) {
+                val pkg = root.packageName?.toString() ?: continue
+                if (pkg !in ALLOW_PKGS) continue
+                for (needle in wanted) {
+                    for (n in runCatching { root.findAccessibilityNodeInfosByText(needle) }.getOrNull().orEmpty()) {
+                        val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
+                        if (text in wanted && !n.isCheckable && clickDeep(n)) return true
+                    }
+                }
+            }
+        }
+        val root = rootInActiveWindow ?: return false
         for (needle in wanted) {
             for (n in root.findAccessibilityNodeInfosByText(needle)) {
                 val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
@@ -669,6 +713,31 @@ class EnforcementService : AccessibilityService() {
             }
         }
         return false
+    }
+
+    /** Update/install complete hone par installer ka "App installed / Update
+     *  installed" success screen dikh sakta hai (Done | Open). DONE click karo —
+     *  sirf installer-host packages par, exact label (keyboard "Done" key wagaira
+     *  kabhi nahi). Open jaan-boojh kar NAHI (app ka UI bachche ke phone par
+     *  uthana nahi — MainService MY_PACKAGE_REPLACED se khud restart hota hai). */
+    private fun clickInstallDone(): Boolean {
+        val wanted = setOf("done", "हो गया", "完成")
+        return runCatching {
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let { roots.add(it) }
+            windows?.forEach { w -> runCatching { w.root?.let { r -> roots.add(r) } } }
+            for (root in roots) {
+                val pkg = root.packageName?.toString() ?: continue
+                if (pkg !in INSTALL_DONE_PKGS) continue
+                for (needle in wanted) {
+                    for (n in runCatching { root.findAccessibilityNodeInfosByText(needle) }.getOrNull().orEmpty()) {
+                        val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
+                        if (text in wanted && !n.isCheckable && clickDeep(n)) return true
+                    }
+                }
+            }
+            false
+        }.getOrDefault(false)
     }
 
     /** Usage/notification lists: find our app's row ("Device Health") and flip its toggle. */
