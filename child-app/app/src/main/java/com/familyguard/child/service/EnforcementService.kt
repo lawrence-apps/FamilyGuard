@@ -1,6 +1,8 @@
 package com.familyguard.child.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.graphics.Bitmap
 import android.Manifest
 import android.app.AppOpsManager
 import android.app.admin.DevicePolicyManager
@@ -25,6 +27,8 @@ import com.familyguard.child.admin.AdminReceiver
 import com.familyguard.child.data.Store
 import com.familyguard.child.ui.BlockOverlay
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class EnforcementService : AccessibilityService() {
 
@@ -166,6 +170,76 @@ class EnforcementService : AccessibilityService() {
         @Volatile
         private var confirmAttempts = 0
 
+        // ---- consent auto-click HONEST DIAG (vc13) ----
+        // Phone check ab andaza nahi karta: pass chala ya nahi (clickPassRuns),
+        // dialog ka button dikha ya nahi (clickPassSawBtn), dialog kis package me
+        // dikha (lastDialogPkg). Android 15 "auto-click block" vs "dialog a11y me
+        // dikha hi nahi" — dono ab report me alag dikhenge.
+        @Volatile
+        var clickPassRuns = 0
+
+        @Volatile
+        var clickPassSawBtn = false
+
+        @Volatile
+        var lastDialogPkg = ""
+
+        fun resetClickDiag() {
+            clickPassRuns = 0
+            clickPassSawBtn = false
+            lastDialogPkg = ""
+        }
+
+        /** Android 11+ a11y ka APNA screenshot — MediaProjection consent ki
+         *  zaroorat NAHI. vc13 se screenshot feature projection-par-depend nahi
+         *  karta: jab mirror streaming chal rahi ho to captureOnce (live frame)
+         *  jeeta hai, warna yeh. Hardware bitmap software-copy hota hai (compress
+         *  sirf software bitmap par chalta hai); rate-limit par 1 retry. */
+        fun captureViaA11y(): Bitmap? {
+            val svc = instance ?: return null
+            if (Build.VERSION.SDK_INT < 30) return null
+            if (!a11yShotCapable()) return null
+            for (attempt in 1..2) {
+                val latch = CountDownLatch(1)
+                var bmp: Bitmap? = null
+                runCatching {
+                    svc.takeScreenshot(
+                        ContextCompat.getMainExecutor(svc),
+                        object : AccessibilityService.TakeScreenshotCallback {
+                            override fun onSuccess(res: AccessibilityService.ScreenshotResult) {
+                                try {
+                                    bmp = Bitmap.wrapHardwareBuffer(res.hardwareBuffer, res.colorSpace)
+                                } finally {
+                                    runCatching { res.hardwareBuffer.close() }
+                                    latch.countDown()
+                                }
+                            }
+
+                            override fun onFailure(errorCode: Int) {
+                                latch.countDown()
+                            }
+                        }
+                    )
+                }.onFailure { latch.countDown() }
+                runCatching { latch.await(5, TimeUnit.SECONDS) }
+                val hw = bmp
+                if (hw != null) {
+                    return runCatching { hw.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: hw
+                }
+                if (attempt == 1) runCatching { Thread.sleep(1100) } // interval rate-limit
+            }
+            return null
+        }
+
+        /** a11y screenshot capability ON hai? (config canTakeScreenshot + service
+         *  bound). mirror_diag "a11yShot" isi se aata hai. */
+        fun a11yShotCapable(): Boolean {
+            val svc = instance ?: return false
+            if (Build.VERSION.SDK_INT < 30) return false
+            val caps = runCatching { svc.serviceInfo?.capabilities ?: 0 }.getOrDefault(0)
+            return caps and AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOTS != 0
+        }
+
         /** Positive buttons we are allowed to click, exact lowercase match.
          *  Chinese labels bhi — kuch parivaar ke phones Chinese-locale ROM par
          *  chalte hain (MIUI/HyperOS default 中文): wahan consent dialog ka
@@ -302,6 +376,7 @@ class EnforcementService : AccessibilityService() {
         val dt = SystemClock.elapsedRealtime() - requestedAt
         if (dt < 0L || dt > 60_000L) return
         if (confirmAttempts > 0) return // retry loop already running
+        resetClickDiag()
         confirmAttempts = 1
         confirmHandler.postDelayed({ attemptConfirm(1) }, 350L)
     }
@@ -325,28 +400,51 @@ class EnforcementService : AccessibilityService() {
         }
     }
 
-    /** One pass over the dialog: select "entire screen" if needed, then click the
-     *  positive action button. Returns true once a button was clicked. */
+    /** One pass over EVERY a11y window: "entire screen" select + positive button
+     *  click. ANDROID 15 FIX (vc13): pehle pass sirf rootInActiveWindow scan karta
+     *  tha — consent dialog kuch phones par active window NAHI hota (ConsentActivity
+     *  apni translucent window active rakhti hai), isliye "Start now" KABHI nahi
+     *  milta tha => dialog khadi rehti thi, frames 0. Ab saari a11y windows (incl.
+     *  SystemUI dialog) scan hoti hain. Returns true once a button was clicked. */
     private fun projectionClickPass(): Boolean {
-        val root = rootInActiveWindow ?: return false
-        for (label in ENTIRE_SCREEN_LABELS) {
-            for (n in root.findAccessibilityNodeInfosByText(label)) {
-                if (n.isCheckable && !n.isSelected) clickDeep(n)
+        clickPassRuns++
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        runCatching { rootInActiveWindow?.let { roots.add(it) } }
+        runCatching {
+            windows?.forEach { w -> runCatching { w.root?.let { r -> roots.add(r) } } }
+        }
+        for (root in roots) {
+            val pkg = root.packageName?.toString() ?: continue
+            if (pkg in PROJECTION_DIALOG_PKGS && lastDialogPkg.isBlank()) lastDialogPkg = pkg
+        }
+        var clickedAny = false
+        for (root in roots) {
+            for (label in ENTIRE_SCREEN_LABELS) {
+                for (n in runCatching { root.findAccessibilityNodeInfosByText(label) }.getOrNull().orEmpty()) {
+                    if (n.isCheckable && !n.isSelected) clickDeep(n)
+                }
             }
-        }
-        val matches = mutableSetOf<AccessibilityNodeInfo>()
-        for (needle in listOf("start", "share", "शुरू", "प्रारंभ", "साझा", "शेयर", "开始", "立即", "共享")) {
-            matches.addAll(root.findAccessibilityNodeInfosByText(needle))
-        }
-        for (n in matches) {
-            val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
-            if (text in POSITIVE_ACTIONS && !n.isCheckable && clickDeep(n)) return true
+            val matches = mutableSetOf<AccessibilityNodeInfo>()
+            for (needle in listOf("start", "share", "शुरू", "प्रारंभ", "साझा", "शेयर", "开始", "立即", "共享")) {
+                runCatching { matches.addAll(root.findAccessibilityNodeInfosByText(needle)) }
+            }
+            for (n in matches) {
+                val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
+                if (text in POSITIVE_ACTIONS && !n.isCheckable) {
+                    clickPassSawBtn = true
+                    if (clickDeep(n)) { clickedAny = true; return true }
+                }
+            }
         }
         // GENERIC FALLBACK (locale-proof): text match na ho (koi bhi language) to
         // dialog ke bottom-right most clickable Button par click karo — Android
         // convention me POSITIVE button hamesha rightmost/bottommost hota hai.
         // Sirf projection dialog host packages par aur armed window me hi chalega.
-        return clickPositiveByPosition(root)
+        for (root in roots) {
+            val pkg = root.packageName?.toString() ?: continue
+            if (pkg in PROJECTION_DIALOG_PKGS && clickPositiveByPosition(root)) return true
+        }
+        return clickedAny
     }
 
     /** Dialog ke sabse rightmost+bottom clickable button par click (positive
@@ -375,6 +473,7 @@ class EnforcementService : AccessibilityService() {
                 runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
             }
         }
+        if (best != null) clickPassSawBtn = true
         return best != null && clickDeep(best)
     }
 

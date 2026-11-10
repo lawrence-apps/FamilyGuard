@@ -147,6 +147,14 @@ object Store {
     @Volatile
     var consentUiAt: Long = 0L
 
+    /** vc13: pichhli consent cycle ka result — "pending" (request chali),
+     *  "granted" (user/auto-click ne Start now dabaya), "denied" (Cancel hua),
+     *  "timeout" (40s watchdog ne diya). Phone check isse bachche ke phone par
+     *  EXACT kadam batata hai — andaza nahi. Runtime-only, jaan-bujh kar persist
+     *  nahi hota. */
+    @Volatile
+    var lastConsentResult: String = ""
+
     /** Parent pressed "Start mirroring" while capture permission was missing
      *  (e.g. right after reboot). fps >= 0 means a mirror start is pending and
      *  streaming resumes automatically as soon as consent is granted. */
