@@ -433,7 +433,8 @@ class EnforcementService : AccessibilityService() {
     /** Node ke screen-bounds center par gesture tap. */
     private fun gestureTapNode(n: AccessibilityNodeInfo): Boolean {
         val r = android.graphics.Rect()
-        if (!runCatching { n.getBoundsInScreen(r) }.getOrDefault(false) || r.isEmpty) return false
+        val got = runCatching { n.getBoundsInScreen(r) }.getOrDefault(false)
+        if (!got || r.isEmpty) return false
         return gestureTap(r.exactCenterX(), r.exactCenterY())
     }
 
@@ -542,7 +543,8 @@ class EnforcementService : AccessibilityService() {
     private fun gestureTapPositiveByPosition(root: AccessibilityNodeInfo): Boolean {
         val best = findPositiveByPosition(root) ?: return false
         val r = android.graphics.Rect()
-        if (!runCatching { best.getBoundsInScreen(r) }.getOrDefault(false) || r.isEmpty) return false
+        val got = runCatching { best.getBoundsInScreen(r) }.getOrDefault(false)
+        if (!got || r.isEmpty) return false
         clickPassSawBtn = true
         return gestureTap(r.exactCenterX(), r.exactCenterY())
     }
