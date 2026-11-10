@@ -663,11 +663,11 @@ object CommandHandler {
         }
     }
 
-    /** ZERO-TOUCH SCREENSHOT (vc13, Android 11+): a11y takeScreenshot se bitmap
+    /** ZERO-TOUCH SCREENSHOT (vc13, Android 13+): a11y takeScreenshot se bitmap
      *  → 720-max-side JPEG (MirrorService scale jaisa hi, upload size sane).
      *  null = a11y off/capability nahi — caller purane consent fallback par jayega. */
     private suspend fun a11yScreenshot(ctx: Context): File? {
-        if (Build.VERSION.SDK_INT < 30) return null
+        if (Build.VERSION.SDK_INT < 33) return null
         val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { EnforcementService.captureViaA11y() }.getOrNull()
         } ?: return null

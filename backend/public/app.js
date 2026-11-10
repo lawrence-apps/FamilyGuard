@@ -1419,7 +1419,7 @@ function renderMirrorDiag(d) {
     }
     rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko" + extra + "</li>");
   }
-  if (d.capturePending) rows.push("<li>📸 <b>Screenshot:</b> consent ka intezaar — sirf Android <11 / a11y OFF par hota hai; build 13 se screenshot a11y se aata hai, consent chahiye hi nahi</li>");
+  if (d.capturePending) rows.push("<li>📸 <b>Screenshot:</b> consent ka intezaar — sirf Android <13 / a11y OFF par hota hai; build 13 se screenshot a11y se aata hai, consent chahiye hi nahi</li>");
   rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
   rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga"));
   rows.push(diagRow(h.accessibility !== false, "Accessibility", h.accessibility === false ? "OFF" : "ON ✓", h.accessibility === false ? "Settings → Accessibility → Device Health → ON (consent auto-confirm isi se hota hai)" : ""));

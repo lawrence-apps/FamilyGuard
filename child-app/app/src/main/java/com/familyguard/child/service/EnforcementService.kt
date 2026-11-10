@@ -190,20 +190,23 @@ class EnforcementService : AccessibilityService() {
             lastDialogPkg = ""
         }
 
-        /** Android 11+ a11y ka APNA screenshot — MediaProjection consent ki
+        /** Android 13+ a11y ka APNA screenshot — MediaProjection consent ki
          *  zaroorat NAHI. vc13 se screenshot feature projection-par-depend nahi
          *  karta: jab mirror streaming chal rahi ho to captureOnce (live frame)
-         *  jeeta hai, warna yeh. Hardware bitmap software-copy hota hai (compress
-         *  sirf software bitmap par chalta hai); rate-limit par 1 retry. */
+         *  jeeta hai, warna yeh. (API 33+ 3-arg takeScreenshot — is compileSdk
+         *  ka stub sirf displayId wala overload deta hai.) Hardware bitmap
+         *  software-copy hota hai (compress sirf software bitmap par chalta hai);
+         *  rate-limit par 1 retry. */
         fun captureViaA11y(): Bitmap? {
             val svc = instance ?: return null
-            if (Build.VERSION.SDK_INT < 30) return null
+            if (Build.VERSION.SDK_INT < 33) return null
             if (!a11yShotCapable()) return null
             for (attempt in 1..2) {
                 val latch = CountDownLatch(1)
                 var bmp: Bitmap? = null
                 runCatching {
                     svc.takeScreenshot(
+                        android.view.Display.DEFAULT_DISPLAY,
                         ContextCompat.getMainExecutor(svc),
                         object : AccessibilityService.TakeScreenshotCallback {
                             override fun onSuccess(res: AccessibilityService.ScreenshotResult) {
@@ -232,10 +235,10 @@ class EnforcementService : AccessibilityService() {
         }
 
         /** a11y screenshot capability ON hai? (config canTakeScreenshot + service
-         *  bound). mirror_diag "a11yShot" isi se aata hai. */
+         *  bound + Android 13+). mirror_diag "a11yShot" isi se aata hai. */
         fun a11yShotCapable(): Boolean {
             val svc = instance ?: return false
-            if (Build.VERSION.SDK_INT < 30) return false
+            if (Build.VERSION.SDK_INT < 33) return false
             val caps = runCatching { svc.serviceInfo?.capabilities ?: 0 }.getOrDefault(0)
             return caps and AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOTS != 0
         }
