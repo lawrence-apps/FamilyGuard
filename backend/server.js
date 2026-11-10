@@ -317,7 +317,16 @@ const ALLOWED_ACTIONS = new Set([
   'show_app_icon', 'hide_app_icon', 'get_apps', 'message', 'release_protections',
   'sync_usage', // Report tab "Sync now" — usage + call log + SMS turant sync
   'heal', 'health', // self-heal trigger + health check (dashboard use these)
-  'update_apk' // silent self-update abhi check (dashboard "Child app update" button)
+  'update_apk', // silent self-update abhi check (dashboard "Child app update" button)
+  // CRITICAL FIX (v1.11): ye 3 actions dashboard se BHEJE jaate the par whitelist
+  // me the hi nahi — server har baar 400 "unknown action" deta tha. Isliye
+  // Gallery (gallery_list/gallery_full) aur 🔍 Phone check (mirror_diag) KABHI
+  // kaam nahi kiye the, chahe child app sab handle karta tha. Mirror frames
+  // parent-WS se jaate hain (bypass), isliye mirror "dead" lagta tha sirf isliye
+  // ki Phone check diagnosis khud 400 kha rahi thi.
+  'gallery_list', // Live tab "📸 Gallery kholo" — MediaStore page + thumbs
+  'gallery_full', // gallery tile tap — full photo/video
+  'mirror_diag' // 🔍 Phone check — bachche ke phone ka mirror/permission snapshot
 ]);
 
 app.post('/api/commands', auth, parentOnly, (req, res) => {
