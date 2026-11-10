@@ -21,6 +21,10 @@ import androidx.core.content.IntentCompat
 import com.familyguard.child.R
 import com.familyguard.child.data.Store
 import com.familyguard.child.util.AgeRelease
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MirrorService : Service() {
 
@@ -131,6 +135,42 @@ class MirrorService : Service() {
                 MirrorManager.release()
                 notifyStreaming(false)
                 stopSelf()
+            } else {
+                // SCREENSHOT AUTO-COMPLETE (vc10): screenshot command fail hui thi
+                // (projection nahi thi), consent manga gaya tha aur ab MIL GAYI.
+                // Pehle parent ko DOBARA tap karna padta tha — ab khud capture +
+                // upload karke ORIGINAL command id par result bhej do. Parent ke
+                // screenshot button par image bina dobara tap ke aa jati hai.
+                val cmdId = Store.pendingCaptureCmdId
+                val appCtx = applicationContext
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    runCatching {
+                        kotlinx.coroutines.delay(800) // VD ka pehla real frame aane do
+                        val f = MirrorManager.captureOnce(appCtx)
+                        // File capture ho gayi (ya fail) — busy window khatam, idle
+                        // watchdog agli cycle me session release kar dega.
+                        Store.pendingCaptureAt = 0L
+                        val out = com.google.gson.JsonObject()
+                        out.addProperty("type", "command_result")
+                        out.addProperty("id", cmdId)
+                        val data = com.google.gson.JsonObject()
+                        if (f != null) {
+                            val url = com.familyguard.child.data.Api.uploadMedia(f)
+                            data.addProperty("url", url)
+                            runCatching { f.delete() }
+                            out.addProperty("ok", true)
+                        } else {
+                            data.addProperty(
+                                "error",
+                                "consent mil gayi par frame nahi bana — screenshot dobara bhejo"
+                            )
+                            out.addProperty("ok", false)
+                        }
+                        out.add("data", data)
+                        if (cmdId.isNotBlank()) WsChild.send(out.toString())
+                        Store.pendingCaptureCmdId = ""
+                    }
+                }
             }
         }
         return true

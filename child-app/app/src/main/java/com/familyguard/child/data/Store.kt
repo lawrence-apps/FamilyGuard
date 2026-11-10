@@ -163,6 +163,12 @@ object Store {
     @Volatile
     var pendingCaptureAt: Long = 0L
 
+    /** Screenshot command ka WS id jo consent ka intezaar kar raha hai — MirrorService
+     *  consent milte hi khud capture + upload karke ISI id ke saath command_result
+     *  bhejta hai (parent ka screenshot button bina dobara tap ke complete hota hai). */
+    @Volatile
+    var pendingCaptureCmdId: String = ""
+
     /** One-tap auto-grant walkthrough: the wizard arms the step name + deadline and
      *  EnforcementService clicks the matching system dialogs/toggles while armed. */
     @Volatile

