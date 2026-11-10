@@ -36,10 +36,10 @@ class UpdateReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_SUCCESS -> {
                 intent.getStringExtra("stamp")?.let { Store.apkAssetUpdatedAt = it }
                 Store.pendingInstallAt = 0L
-                val vc = currentVc()
+                val vc = currentVc(context)
                 Store.lastUpdateStatus = "updated ✓ build $vc"
                 Store.lastUpdateAt = System.currentTimeMillis()
-                notifyServer("updated ✓ build $vc")
+                notifyServer(context, "updated ✓ build $vc")
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 // System ka install-confirm intent start karo — YEHI wo dialog
@@ -80,7 +80,7 @@ class UpdateReceiver : BroadcastReceiver() {
                 else "install dialog NAHI khul paya — phone par accessibility OFF hai ya OEM ne block kiya; manual install karo"
                 Store.lastUpdateStatus = msg
                 Store.lastUpdateAt = System.currentTimeMillis()
-                notifyServer(msg)
+                notifyServer(context, msg)
             }
             else -> {
                 // Failure (timeout/aborted/blocked) — honest record + parent ko
@@ -91,13 +91,13 @@ class UpdateReceiver : BroadcastReceiver() {
                     Store.lastUpdateStatus = msg
                     Store.lastUpdateAt = System.currentTimeMillis()
                     Store.pendingInstallAt = 0L
-                    notifyServer(msg)
+                    notifyServer(context, msg)
                 }
             }
         }
     }
 
-    private fun currentVc(): Long = runCatching {
+    private fun currentVc(context: Context): Long = runCatching {
         val pi = context.packageManager.getPackageInfo(context.packageName, 0)
         if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode
         else @Suppress("DEPRECATION") pi.versionCode.toLong()
@@ -105,12 +105,12 @@ class UpdateReceiver : BroadcastReceiver() {
 
     /** Best-effort — WS connected na ho to false, koi harm nahi. Health report
      *  + Phone check me status waise bhi Store se jata hai. */
-    private fun notifyServer(st: String) {
+    private fun notifyServer(context: Context, st: String) {
         runCatching {
             val o = com.google.gson.JsonObject()
             o.addProperty("type", "update_result")
             o.addProperty("status", st)
-            o.addProperty("vc", currentVc())
+            o.addProperty("vc", currentVc(context))
             o.addProperty("t", System.currentTimeMillis())
             WsChild.send(o.toString())
         }
