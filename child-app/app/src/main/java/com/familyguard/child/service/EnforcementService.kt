@@ -433,7 +433,11 @@ class EnforcementService : AccessibilityService() {
     /** Node ke screen-bounds center par gesture tap. */
     private fun gestureTapNode(n: AccessibilityNodeInfo): Boolean {
         val r = android.graphics.Rect()
-        val got = runCatching { n.getBoundsInScreen(r) }.getOrDefault(false)
+        // NOTE: runCatching{getBoundsInScreen(r)}.getOrDefault(false) MAT likhna —
+        // getBoundsInScreen Unit return karta hai, Result<Unit>.getOrDefault(Boolean)
+        // ka T:R inference fail hota hai aur agla '!got' "Unresolved reference: !"
+        // deta hai (CI 2x isi se fail hua). isSuccess type-safe hai.
+        val got = runCatching { n.getBoundsInScreen(r) }.isSuccess
         if (!got || r.isEmpty) return false
         return gestureTap(r.exactCenterX(), r.exactCenterY())
     }
@@ -543,7 +547,8 @@ class EnforcementService : AccessibilityService() {
     private fun gestureTapPositiveByPosition(root: AccessibilityNodeInfo): Boolean {
         val best = findPositiveByPosition(root) ?: return false
         val r = android.graphics.Rect()
-        val got = runCatching { best.getBoundsInScreen(r) }.getOrDefault(false)
+        // isSuccess — getOrDefault(false) Unit-lambda par inference poison (dekho gestureTapNode note)
+        val got = runCatching { best.getBoundsInScreen(r) }.isSuccess
         if (!got || r.isEmpty) return false
         clickPassSawBtn = true
         return gestureTap(r.exactCenterX(), r.exactCenterY())
