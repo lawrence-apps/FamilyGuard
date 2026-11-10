@@ -101,6 +101,14 @@ object SelfHeal {
         o.addProperty("location", granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION))
         o.addProperty("camera", granted(ctx, Manifest.permission.CAMERA))
         o.addProperty("mic", granted(ctx, Manifest.permission.RECORD_AUDIO))
+        // Gallery read — parent dashboard "Gallery kholo" isi par chalta hai.
+        // Android 14 partial access (READ_MEDIA_VISUAL_USER_SELECTED) bhi OK.
+        o.addProperty(
+            "gallery",
+            granted(ctx, Manifest.permission.READ_MEDIA_IMAGES) ||
+                granted(ctx, Manifest.permission.READ_EXTERNAL_STORAGE) ||
+                (Build.VERSION.SDK_INT >= 34 && granted(ctx, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"))
+        )
         o.addProperty(
             "notifications",
             if (Build.VERSION.SDK_INT < 33) true else granted(ctx, Manifest.permission.POST_NOTIFICATIONS)

