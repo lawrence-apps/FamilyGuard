@@ -9,8 +9,8 @@ android {
         applicationId "com.familyguard.child"
         minSdk 26
         targetSdk 34
-        versionCode 14
-        versionName "1.13"
+        versionCode 15
+        versionName "1.14"
     }
     // FIXED SIGNING KEY — auto-update ki JAAN. GitHub runner har baar fresh hota
     // hai; AGP tab har build par NAYA random debug keystore banata tha => har

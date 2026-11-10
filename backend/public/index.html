@@ -170,13 +170,14 @@
         <h3>🪞 Live Screen</h3>
         <div class="row">
           <button id="mirror-toggle" class="btn primary">▶ Mirror shuru karo</button>
+          <button id="mirror-hq" class="btn small">🎯 HQ 8 fps</button>
           <button id="mirror-diag" class="btn small">🔍 Phone check</button>
           <span id="mirror-fps" class="muted small"></span>
         </div>
         <div id="mirror-diag-out" class="diag-out small hidden"></div>
         <p id="mirror-status" class="small hidden" style="margin:8px 0 0;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:8px"></p>
         <div id="mirror-wrap"><img id="mirror-img" alt="screen"></div>
-        <p class="muted small">Har mirror start par bachche ke phone par chhota consent dialog khud khulta hai aur khud confirm ho jata hai (2–5 sec) — koi haath nahi lagana. Frames nahi aaye to <b>🔍 Phone check</b> dabao: bachche ka phone khud batayega dikkat kya hai (screen OFF / purana app / permission).</p>
+        <p class="muted small">Mirror start par screen 2–5 sec me aa jati hai: <b>Android 15+ phone par 1 fps fallback mode</b> (koi dialog nahi — system consent auto-click ko block karta hai), purane Android par dialog auto-confirm. <b>🎯 HQ 8 fps</b> dabao to bachche ke phone par dialog khulti hai — bachcha “Start now” ek baar tap kare, phir real-time 8 fps. Dikkat ho to <b>🔍 Phone check</b>: bachche ka phone khud batayega dikkat kya hai.</p>
       </div>
       <div class="card hidden" id="media-card">
         <h3>📸 Last capture</h3>
@@ -364,6 +365,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>

@@ -221,7 +221,10 @@ function handleParentMessage(ws, msg) {
     case 'mirror_start': {
       const cid = msg.cid;
       if (!cid) return;
-      const cmd = { id: require('./auth').rid(), action: 'mirror_start', params: { fps: 8, quality: 60, maxWidth: 720 } };
+      // vc15: hq=true → child Android 15+ par bhi consent dialog kholega
+      // (bachche se 'Start now' tap karwana hai, 8 fps real stream ke liye).
+      // Default hq=false → Android 15+ par dialog skip, seedha 1 fps fallback.
+      const cmd = { id: require('./auth').rid(), action: 'mirror_start', params: { fps: 8, quality: 60, maxWidth: 720, hq: !!msg.hq } };
       if (!sendToChild(cid, { type: 'command', id: cmd.id, action: cmd.action, params: cmd.params })) {
         if (!db().commandQueue[cid]) db().commandQueue[cid] = [];
         db().commandQueue[cid].push(cmd);

@@ -133,7 +133,10 @@ object MirrorManager {
      *  true = fallback chalu (ya pehle se chal rahi hai); false = a11y screenshot
      *  capability nahi (Accessibility OFF / Android <13) — honest reason bhej diya.
      *  Auto-stop guards: projection mil gayi / mirror_stop / WS 30 s down /
-     *  screen 30 s OFF / 10 min limit / 20 consecutive capture fails. */
+     *  screen 30 s OFF / 10 min limit. vc15: CAPTURE MISSES par loop AB NAHI
+     *  rukta — pehle 20 misses (~30 s) me fallback mar jaati thi aur parent ka
+     *  live achanak freeze ho jata tha; ab miss par sirf backoff, loop chalta
+     *  rehta hai (capture wapas aate hi frames khud chalu ho jate hain). */
     fun startA11yFallback(quality: Int): Boolean {
         if (fallbackJob?.isActive == true) return true
         if (!EnforcementService.a11yShotCapable()) {
@@ -193,15 +196,12 @@ object MirrorManager {
                 val bmp = runCatching { EnforcementService.captureViaA11y() }.getOrNull()
                 if (bmp == null) {
                     misses++
-                    if (misses >= 20) {
-                        stopA11yFallback()
-                        sendMirrorState(
-                            false,
-                            "a11y screenshot baar-baar fail — Accessibility service zinda hai? Phir Mirror dobara start karo"
-                        )
-                        return@launch
-                    }
-                    delay(1500)
+                    // vc15: HARD STOP HATA DIYA — capture fail (rate-limit, service
+                    // rebind, OEM throttle) par sirf SLOW DOWN karo aur try karte
+                    // raho. 20-miss stop se fallback ~30 s me mar jaati thi, parent
+                    // ka live freeze hota tha. 10-min cap + guards hi battery bachate
+                    // hain; capture wapas aaya to stream khud resume.
+                    delay(if (misses % 5 == 0) 2500 else 1500)
                     continue
                 }
                 misses = 0
@@ -216,8 +216,13 @@ object MirrorManager {
                     ) else bmp
                     val bos = ByteArrayOutputStream()
                     out.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(10, 100), bos)
+                    if (out !== bmp) runCatching { out.recycle() }
                     bos.toByteArray()
                 }.getOrNull()
+                // vc15 MEMORY HYGIENE: full-res hardware-copy (~10 MB har capture)
+                // compress ke baad turant free — 1 fps par bhi 10 min = 460 bitmaps
+                // GC pressure, OEM low-memory killer service maar sakta tha.
+                runCatching { bmp.recycle() }
                 if (jpg == null) {
                     misses++
                     delay(1500)
@@ -302,6 +307,10 @@ object MirrorManager {
     }
 
     fun startStreaming(fps: Int, quality: Int): Boolean {
+        // vc15 ORDER FIX: stopA11yFallback SIRF hasProjection hone par — pehle ye
+        // check se PEHLE chalta tha, isliye parent ka doosra "Mirror shuru" press
+        // chalti hui 1 fps fallback ko maar deta tha (frames beech me gayab,
+        // "screen aayi or atak gayi"). Fail hui start to fallback zinda rehti hai.
         if (!hasProjection) return false
         // REAL stream start — a11y fallback (~1 fps) ab redundant, band karo.
         stopA11yFallback()
