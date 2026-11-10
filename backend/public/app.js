@@ -19,6 +19,7 @@ const S = {
   rules: null,
   usage: null,
   apps: [],            // installed apps reported by child (WS "apps")
+  childVcTooOld: false, // "unknown action" proof — build itna purana ki versionCode report bhi nahi karta
   mirrorOn: false,
   frameCount: 0,
   lastFpsAt: 0,
@@ -308,7 +309,12 @@ function renderVersionBanner() {
   const c = activeChild();
   const el = $("oldver-banner");
   if (!el) return;
-  const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
+  let vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
+  if (vc !== null && vc >= LATEST_VC) S.childVcTooOld = false; // phone update ho gaya — flag clear
+  // "unknown action" aaya tha = build itna purana ki Phone check tak nahi jaanta
+  // (vc6- health me versionCode field hi nahi) — banner dikhao warna user kabhi
+  // PURANA guidance hi nahi dekhta (yehi hua tha: phone vc6 par atka rahe).
+  if (vc === null && S.childVcTooOld) vc = -1;
   if (!c || !c.paired || vc === null || vc >= LATEST_VC) { el.classList.add("hidden"); return; }
   // Server par kaunsa APK pada hai (CI meta json se) — visibility ke bina
   // "server purana hai ya phone atka hai" pata hi nahi chalta tha.
@@ -339,7 +345,7 @@ function renderVersionBanner() {
     const human = Object.keys(uMap).find((k) => lur.status.indexOf(k) === 0);
     lastTry = "<div style=\"margin-top:8px;padding:6px 10px;background:#FFF;border-radius:8px;border:1px solid #FCA5A5\">📋 <b>Aakhri update try (" + timeAgoHi(lur.t) + "):</b> " + (human ? uMap[human] : esc(lur.status)) + "</div>";
   }
-  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest " + LATEST_VC + " = v" + LATEST_V + "). " + esc(svcLine) + "<br>" +
+  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (" + (vc === -1 ? "<b>bahut purana build — Phone check tak kaam nahi karti</b>" : "build " + vc) + ", latest " + LATEST_VC + " = v" + LATEST_V + "). " + esc(svcLine) + "<br>" +
     (vc <= 8
       ? "<b>Ye purana build khud ko update nahi kar sakta</b> — uske andar wala updater hi kharab tha (install dialog kabhi khulta hi nahi tha; yehi bug naye build me fix ho gaya hai). Isliye <b>ek AAKHRI BAAR manual install</b> karo — uske baad har update hamesha apne aap hoga:"
       : "Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min).") + lastTry;
@@ -719,6 +725,7 @@ function handleWs(m) {
         galleryStatus("⚠️ " + d.error + ". 1 min ruk kar dobara try karo — ya bachche ka net check karo.", true);
       } else if (m.ok && d.status === "mirror_diag") {
         // 🔍 Phone check — bachche ke phone ka poora mirror snapshot aa gaya
+        S.childVcTooOld = false; // Phone check jawab de raha hai — build purana NAHI hai
         renderMirrorDiag(d);
       } else if (m.ok && typeof d.status === "string" && d.status && S.updateApkSentAt && Date.now() - S.updateApkSentAt < 90000) {
         // 📲 update_apk ka HONEST result — pehle sirf generic "Ho gaya ✓" dikhta
@@ -739,22 +746,31 @@ function handleWs(m) {
         $("media-img").src = S.origin + d.url;
         toast("Capture mil gaya ✓ (Live tab dekho)");
       } else if (!m.ok && d.error === "unknown action") {
-        // PURANA child build — ye command usme exist hi nahi karti (Gallery
-        // vc6+ me, Phone check vc7+ me aayi). Ab raw "unknown action" toast ki
-        // jagah saaf batao kya karna hai.
+        // PURANA child build — ye command usme exist hi nahi karti. SABSE ZAROORI
+        // SACH: "📲 Update bhejo" aise phone par KAAM NAHI KAREGA — jitna purana
+        // build hai uska apna updater hi toota hua hai (PENDING dialog bug). Isliye
+        // yahan manual-install guidance hi dena, warna user update-bhejo loop me
+        // ghanton atka rahe (asli hua).
+        S.childVcTooOld = true;
+        renderVersionBanner();
         if (S.gallery.loading) {
           S.gallery.loading = false;
           if (S.galleryTimer) { clearTimeout(S.galleryTimer); S.galleryTimer = null; }
-          galleryStatus("Bachche ke phone par PURANA app hai — Gallery naye build me hai. Upar laal banner me 📲 “Update abhi bhejo” dabao.", true);
+          galleryStatus("Bachche ke phone par BAHUT PURANA app hai — Gallery ke fixes naye build me hain. Neeche dialog ke manual steps follow karo (ek baar install).", true);
         }
         if (S.mirrorDiagSentAt && Date.now() - S.mirrorDiagSentAt < 15000) {
           S.mirrorDiagSentAt = 0;
           renderMirrorDiag({ old: true });
         }
         dialog(
-          "Bachche ka app PURANA hai",
-          "<p>Ye feature bachche ke phone ke <b>naye build (v" + LATEST_V + ")</b> me hai — purana app isse jaanta hi nahi (isliye “unknown action”).</p><p><b>Fix:</b> 📲 Update bhejo — bachche ke phone par khud install ho jayega. <b>Bachche ki screen ON honi chahiye</b>, 2–3 min me ho jayega.</p>",
-          () => { S.updateApkSentAt = Date.now(); sendCmd("update_apk"); }
+          "Bachche ka app BAHUT PURANA hai",
+          "<p>Bachche ke phone par itna purana build hai ki nayi commands (Phone check, Gallery fixes) use pata hi nahi — isliye “unknown action”.</p>" +
+          "<p><b>⚠️ “📲 Update bhejo” is phone par kaam nahi karega</b> — purane build ka apna updater hi kharab hai (isliye ye app itne dino se update nahi hui). <b>EK baar manual install karo — uske baad har update hamesha apne aap hoga:</b></p>" +
+          "<p>1️⃣ <b>Live tab</b> → neeche lal banner me <b>QR bachche ke phone se scan</b> karwao (ya Set tab → APK link bachche ke browser me kholo)<br>" +
+          "2️⃣ Download page par <b>v" + LATEST_V + " (build " + LATEST_VC + ")</b> likha dikhega → <b>⬇ Download</b> → file kholkar <b>Install</b><br>" +
+          "3️⃣ <b>Uninstall ki zarurat NAHI</b> — same app upar se install ho jayegi<br>" +
+          "4️⃣ Install ke baad app khud pair + permissions le legi (sirf Accessibility toggle ek manual step)</p>",
+          null
         );
       } else if (m.ok && d.lat != null && d.lng != null) {
         toast("Ho gaya ✓ (" + Number(d.lat).toFixed(5) + ", " + Number(d.lng).toFixed(5) + ")");
@@ -1367,8 +1383,9 @@ function renderMirrorDiag(d) {
   if (!out) return;
   out.classList.remove("hidden");
   if (d.old) {
-    out.innerHTML = "<b>🔍 Phone check:</b> bachche ke phone par PURANA app hai — Phone check usme hai hi nahi. " +
-      "<b>Fix:</b> Set tab → “📲 Child app abhi update karo”, ya bachche ka phone screen ON rakh kar ~10 min (silent auto-update khud kar lega).";
+    out.innerHTML = "<b>🔍 Phone check:</b> bachche ke phone par <b>bahut purana</b> app hai — Phone check usme hai hi nahi (isliye “unknown action”). " +
+      "<b>⚠️ “Update bhejo” / silent auto-update is purane build par kaam NAHI karega</b> (uska updater toota hua hai). " +
+      "<b>Fix — ek baar manual install:</b> Live tab ka laal banner → QR bachche ke phone se scan → Download page par <b>v" + LATEST_V + " (build " + LATEST_VC + ")</b> dikhega → Download → Install (uninstall ki zarurat nahi). Uske baad sab automatic.";
     return;
   }
   const h = d.health || {};

@@ -681,6 +681,8 @@ app.get('/apk/child', (req, res) => {
 .mut{color:#94a3b8;font-size:13px;line-height:1.6}h1{font-size:20px;margin:6px 0}</style></head>
 <body><div class="c"><div style="font-size:44px">🛡️</div><h1>FamilyGuard — Child App</h1>
 <p class="mut">${name} &middot; ${sizeMb} MB &middot; ${new Date(m.uploadedAt).toLocaleString()}</p>
+${m.versionCode ? `<p style="font-size:17px;margin:6px 0 2px">APK version: <b>v${escHtml(m.versionName || "?")} (build ${m.versionCode})</b></p>
+<p class="mut" style="margin:0 0 4px;font-size:12px">Install ke baad parent website ke Phone check me yahi build number dikhna chahiye — tabhi confirm hoga ki naya version laga hai.</p>` : ""}
 <a class="btn" href="?t=${m.shareToken}&amp;dl=1${validCode ? '&amp;c=' + code : ''}">⬇ Download APK</a>
 ${openBtn}
 <p class="mut">Install karte waqt agar <b>"unknown apps blocked"</b> aaye to:<br><b>Settings → Allow from this source</b> enable karo → wapas aao → install.</p>
