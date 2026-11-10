@@ -261,10 +261,16 @@ app.get('/api/events/:cid', auth, parentOnly, (req, res) => {
 });
 
 // ---------------------------------------------------------------- calls / sms / notifications
+// ORDER FIX: child arrays NEWEST-FIRST bhejta hai (SyncEngine DATE DESC query).
+// pushList har item ko list ke FRONT par unshift karta hai — to seedha loop
+// chalane par poora batch ulta save hota tha (purani entries aage, nayi
+// pichhe). Isliye reverse() karke push karte hain: sabse naya aakhri push
+// hota hai aur list ke sabse aage aa jata hai. Dashboard bhi khud sort karta
+// hai (belt + suspenders), par stored data ka order ab consistent rahega.
 app.post('/api/calls/:cid', auth, childOrParent, (req, res) => {
   const { calls } = req.body || {};
   if (!Array.isArray(calls)) return res.status(400).json({ error: 'calls array required' });
-  for (const c of calls.slice(0, 300)) {
+  for (const c of calls.slice(0, 300).reverse()) {
     store.pushList(db.calls, req.params.cid, c, 1000);
   }
   const ch = db.children.find(x => x.id === req.params.cid);
@@ -287,7 +293,7 @@ app.get('/api/calls/:cid', auth, parentOnly, (req, res) => {
 app.post('/api/sms/:cid', auth, childOrParent, (req, res) => {
   const { sms } = req.body || {};
   if (!Array.isArray(sms)) return res.status(400).json({ error: 'sms array required' });
-  for (const s of sms.slice(0, 300)) {
+  for (const s of sms.slice(0, 300).reverse()) {
     store.pushList(db.sms, req.params.cid, s, 1000);
   }
   const ch = db.children.find(x => x.id === req.params.cid);

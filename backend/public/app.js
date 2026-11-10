@@ -1752,9 +1752,13 @@ async function loadLogs() {
   if (!S.cid) return;
   const c = activeChild();
   const permOff = c ? (c.permCalls === false || c.permSms === false) : false;
+  // NAYA PEHLE: purane server builds me batches ulta save hote the (unshift +
+  // newest-first child array), isliye list me purani SMS/calls aage dikhti thi.
+  // Client-side date-DESC sort — purana stored data bhi sahi order me dikhega.
+  const byNew = (a, b) => (b.date || 0) - (a.date || 0);
   try {
     const cl = await api("/api/calls/" + S.cid);
-    $("calls-list").innerHTML = (cl.calls || []).map((x) => {
+    $("calls-list").innerHTML = (cl.calls || []).slice().sort(byNew).map((x) => {
       const ic = x.type === "missed" ? "📵" : x.type === "in" ? "📥" : x.type === "out" ? "📤" : "📞";
       return "<li><span class=\"when\">" + fmtWhen(x.date) + '</span><div class="t">' + ic +
         " <b>" + esc(x.number) + "</b>" + (x.name ? " <span class='muted'>(" + esc(x.name) + ")</span>" : "") +
@@ -1764,7 +1768,7 @@ async function loadLogs() {
         ? "Call/SMS permission bachche ke phone par OFF hai — upar ⚠️ wala fix padho, permission allow karne ke baad 'Sync now' dabao."
         : "Abhi koi call record nahi aaya. Child connect hone par khud sync hota hai — ya 'Sync now' dabao. Naye calls ~1 min me khud aa jate hain.") + '</li>';
     const sm = await api("/api/sms/" + S.cid);
-    $("sms-list").innerHTML = (sm.sms || []).map((x) =>
+    $("sms-list").innerHTML = (sm.sms || []).slice().sort(byNew).map((x) =>
       "<li><span class=\"when\">" + fmtWhen(x.date) + '</span><div class="t"><b>' + esc(x.number) + "</b></div>" +
       "<div class='d'>" + esc(x.body || "") + "</div></li>").join("") ||
       '<li class="muted">' + (permOff
