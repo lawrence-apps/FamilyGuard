@@ -610,6 +610,34 @@ app.get('/api/apk', auth, parentOnly, (req, res) => {
   res.json(apkStatus());
 });
 
+// ---------------------------------------------------------------- zero-touch QR provisioning (device owner)
+// Naya/factory-reset phone: Android setup wizard me welcome screen par 6 taps
+// -> "QR code setup" -> ye QR scan -> Android KHUD APK download+install karke
+// app ko Device Owner bana deta hai — ZERO tap. Bonus: managed device = admin
+// install, bachcha settings se bhi uninstall nahi kar sakta, Play Protect
+// managed-device mode me friction kam.
+// CHECKSUM: AdminReceiver signing cert (child-app/keystore/familyguard.keystore,
+// CN=FamilyGuard Child, 30-saal valid) ka SHA-256, base64url no-pad. Keystore
+// repo me fixed hai isliye constant — kabhi key badle to
+// scripts/compute_admin_checksum.py se naya nikalo (APK v2 signing block se
+// cert extract karke keytool se compare bhi karta hai).
+const ADMIN_COMPONENT = 'com.familyguard.child/com.familyguard.child.admin.AdminReceiver';
+const ADMIN_SIG_CHECKSUM = 'svbRvxsMI4x-6JmodDCPwOcN2y8KjUUcY-JI38ok7Qk';
+
+app.get('/api/provision-info', auth, parentOnly, (req, res) => {
+  const s = apkStatus();
+  res.json({
+    component: ADMIN_COMPONENT,
+    checksum: ADMIN_SIG_CHECKSUM,
+    // QR download location: server par jo APK padi hai wahi (token link —
+    // sync ke baad bhi share token stable rehta hai). Server par APK na ho
+    // (na sync hui, na upload) to dashboard GitHub release URL use karega.
+    apkServerPath: s.url,
+    apkVc: s.vc,
+    ghUrl: `https://github.com/${GH_REPO}/releases/latest/download/${GH_CHILD_ASSET}`
+  });
+});
+
 // Child app ka silent self-update check: bachche ka apna JWT isko poll karta hai
 // (aur WS apk_update push bhi isi meta par based hai).
 app.get('/api/child/apk', auth, (req, res) => {

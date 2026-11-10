@@ -537,6 +537,39 @@ $("apk-force-update").onclick = () => {
   sendCmd("update_apk");
 };
 
+// Zero-touch QR provisioning (device owner): naya/factory-reset phone ka setup
+// wizard is QR ko scan karke app KHUD download+install karta hai — ek bhi tap
+// nahi lagta. Payload Android ka standard provisioning JSON hai (component +
+// signing checksum + APK download location — sab server /api/provision-info se).
+$("provision-btn").onclick = async () => {
+  let info;
+  try { info = await api("/api/provision-info"); }
+  catch (e) { alert("Provision info nahi mila: " + e.message); return; }
+  const apkUrl = info.apkServerPath ? S.origin + info.apkServerPath : info.ghUrl;
+  const payload = JSON.stringify({
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": info.component,
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": info.checksum,
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": apkUrl
+  });
+  let qr = "";
+  try {
+    const q = qrcode(0, "M");
+    q.addData(payload);
+    q.make();
+    qr = q.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+  } catch (e) { qr = "<p class='small'>QR render fail: " + esc(e.message) + "</p>"; }
+  dialog("🧾 Zero-touch QR setup — naya phone", `
+    <div style="text-align:center">${qr}</div>
+    <ol class="small" style="margin:10px 0 0 18px;line-height:1.7">
+      <li>Bachche ka phone <b>NAYA</b> ho ya <b>factory-reset</b> (already-setup phone par ye flow chalta hi nahi). Pehle WiFi se connect karo.</li>
+      <li>Welcome screen par kahin bhi <b>6 baar tap</b> karo → <b>QR code setup</b> khulega.</li>
+      <li>Ye QR scan karo — app <b>khud download + install</b> hogi, ek bhi tap nahi lagega. Device Owner ban jayegi (uninstall proof, Play Protect friction kam).</li>
+      <li>Install hone ke baad app khud khulegi — dashboard se <b>pairing code</b> daal do (Add child me milta hai).</li>
+    </ol>
+    <p class="muted small" style="margin-top:8px">Download: ${info.apkServerPath ? "server APK (build " + info.apkVc + ")" : "GitHub release"} · Admin cert checksum embedded hai.</p>
+  `);
+};
+
 $("apk-sync").onclick = async () => {
   $("apk-sync").disabled = true;
   $("apk-hint").textContent = "🔄 GitHub se sync kar rahe hain…";
