@@ -478,9 +478,19 @@ function renderApk(st) {
     const url = S.origin + st.url;
     const mb = st.size ? " · " + (st.size / 1048576).toFixed(1) + " MB" : "";
     if (isGh) {
-      $("apk-hint").textContent = "✅ GitHub se auto-sync: " + (st.releaseTag || "latest") + mb + ". Naya build aate hi bachche ka app KHUD update ho jayegi (bina popup/notification) — link/QR same rehta hai, kuch karne ki zarurat nahi.";
+      // Sync health — server ka last sync kab hua / fail to kyun hua. Ab
+      // "update kyun nahi aa raha" andhere me guess nahi, seedha dikhega.
+      let syncNote = "";
+      if (st.vc && st.vc < LATEST_VC) syncNote = " ⚠️ Server par PURANA build pada hai — \"🔄 Sync now\" dabao";
+      else if (st.sync && st.sync.lastError) syncNote = " ⚠️ Last sync fail: " + st.sync.lastError;
+      else if (st.sync && st.sync.lastOk) {
+        const mins = Math.round((Date.now() - st.sync.lastOk) / 60000);
+        syncNote = " (sync " + (mins < 1 ? "abhi abhi" : mins + " min pehle") + ")";
+      }
+      $("apk-hint").textContent = "✅ GitHub se auto-sync: " + (st.releaseTag || "latest") + (st.vName ? " · v" + st.vName + " (build " + st.vc + ")" : "") + mb + syncNote + ". Naya build aate hi bachche ka app KHUD update ho jayegi (bina popup/notification) — link/QR same rehta hai, kuch karne ki zarurat nahi.";
     } else {
-      $("apk-hint").textContent = "📦 Manually uploaded" + mb + ". Auto-sync isko replace nahi karega — GitHub build wapas chahiye to \"Sync now\" dabao.";
+      const mv = st.vc ? " · v" + st.vName + " (build " + st.vc + ")" : "";
+      $("apk-hint").textContent = "📦 Manually uploaded" + mv + mb + ". Naya GitHub build aane par ye khud replace ho jayega — turant chahiye to \"Sync now\" dabao.";
     }
     $("apk-force-update").classList.remove("hidden");
     $("apk-link").classList.remove("hidden");

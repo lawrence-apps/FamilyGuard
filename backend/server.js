@@ -12,6 +12,7 @@ const store = require('./src/store');
 const { sign, verify, auth, parentOnly, childOrParent, childOnly, rid, code6 } = require('./src/auth');
 const wsHub = require('./src/ws');
 const tg = require('./src/telegram');
+const { apkVersionFromBuffer } = require('./apkver');
 
 store.load();
 const db = store.db;
@@ -376,6 +377,11 @@ function apkMeta() {
   try { return JSON.parse(fs.readFileSync(APK_META, 'utf8')); } catch (e) { return null; }
 }
 
+// Sync health — /apk/info + website "Sync now" ke paas dikhane ke liye. Blind
+// debugging ("server par kaunsa APK hai, sync chal raha hai ya nahi") ka
+// saral jawab: lastAttempt/lastOk/lastError.
+const apkSyncState = { lastAttempt: 0, lastOk: 0, lastError: '', lastReason: '' };
+
 function apkStatus() {
   const m = apkMeta();
   return {
@@ -392,10 +398,31 @@ function apkStatus() {
     vc: m ? (m.versionCode || 0) : 0,
     vName: m ? (m.versionName || '') : '',
     buildCommit: m ? (m.buildCommit || '') : '',
+    lastSyncError: apkSyncState.lastError || '',
     githubConfigured: !!GH_REPO,
     githubTokenSet: !!GH_TOKEN
   };
 }
+
+// PUBLIC (no auth): server par abhi kaunsa child APK pada hai — sirf version
+// info, koi shareToken/URL nahi. "Child update kyun nahi ho raha" ka diagnosis
+// ab ek curl se ho jayega: /apk/info → {vc, source, lastSync, sync.lastError}.
+app.get('/apk/info', (req, res) => {
+  const s = apkStatus();
+  res.json({
+    vc: s.vc,
+    vName: s.vName,
+    source: s.source,
+    releaseTag: s.releaseTag,
+    size: s.size,
+    uploadedAt: s.uploadedAt,
+    lastSync: s.lastSync,
+    githubConfigured: s.githubConfigured,
+    githubTokenSet: s.githubTokenSet,
+    sync: apkSyncState,
+    serverTime: Date.now()
+  });
+});
 
 // Pull the latest CI-built child APK from the GitHub release. Keeps the existing
 // share token so old install links/QRs keep working across syncs.
@@ -425,18 +452,35 @@ async function syncApkFromGithub({ manual = false } = {}) {
     const asset = (data.assets || []).find(a => a.name === GH_CHILD_ASSET);
     if (!asset) return { ok: false, ...base, reason: `asset "${GH_CHILD_ASSET}" release me nahi mila` };
 
+    // CI ki build-info meta asset PEHLE padh lo — override ka faisla VERSION
+    // ke hisaab se bhi ho sake (timestamp ke saath manual-upload trick band).
+    let buildInfo = null;
+    try {
+      const mi = (data.assets || []).find(a => a.name === GH_CHILD_META);
+      if (mi) {
+        const mr = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/assets/${mi.id}`, {
+          headers: { ...headers, Accept: 'application/octet-stream' }
+        });
+        if (mr.ok) buildInfo = JSON.parse(Buffer.from(await mr.arrayBuffer()).toString('utf8').trim());
+      }
+    } catch (e) {}
+    const relVc = Number((buildInfo && buildInfo.versionCode) || 0);
+
     const cur = apkMeta();
-    // Manual upload override — par SIRF tab tak jab tak wo GitHub release se
-    // nayi hai. Pehle ye override HAMESHA jeet leta tha: ek dafa manual upload
-    // hone par background sync hamesha ke liye band ho jata tha aur server
-    // purana APK hi baant-ta rehta (child ka auto-update kabhi trigger hi nahi
-    // hota tha — "manual update kar diya, auto ni hora" ka root cause). Ab:
-    // release asset manual upload se NAYA ho to sync jeetega.
+    // Manual upload override — par SIRF jab tak wo GitHub release se nayi hai.
+    // Do comparisons: (a) TIME — release asset upload humari manual se naya ho;
+    // (b) VERSION — release ka versionCode humari manual APK se bada ho. (b)
+    // sabse bharosemand hai: pehle sirf time comparison tha, to user ne jab
+    // galti se PURANI APK naye time par upload ki (1.6 manual upload ke baad
+    // v1.7 release aya) to override kabhi nahi hata — server purana APK hi
+    // baant-ta raha aur child ka auto-update kabhi trigger hi nahi hota tha.
     if (!manual && cur && (!cur.source || cur.source === 'manual')) {
       const relMs = Date.parse(asset.updated_at || '') || 0;
       const upMs = Number(cur.uploadedAt) || 0;
-      if (upMs >= relMs) {
-        return { ok: true, skipped: true, ...base, reason: 'manual upload release se nayi hai — sync ne nahi chhua' };
+      const curVc = Number(cur.versionCode) || 0;
+      const relNewer = upMs < relMs || (relVc > 0 && curVc > 0 && relVc > curVc);
+      if (!relNewer) {
+        return { ok: true, skipped: true, ...base, reason: 'manual upload release se nayi/naya-version hai — sync ne nahi chhua', releaseVc: relVc, serverVc: curVc };
       }
     }
     const fresh = cur && cur.source === 'github' && cur.assetId === asset.id &&
@@ -459,18 +503,20 @@ async function syncApkFromGithub({ manual = false } = {}) {
     const tmp = APK_FILE + '.tmp';
     fs.writeFileSync(tmp, buf);
     fs.renameSync(tmp, APK_FILE);
-    // Build-info meta asset (CI upload karta hai) — server par KAUNSA version
-    // hai ye website/banner dikha sake. Missing ho (purane release) to null.
-    let buildInfo = null;
-    try {
-      const mi = (data.assets || []).find(a => a.name === GH_CHILD_META);
-      if (mi) {
-        const mr = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/assets/${mi.id}`, {
-          headers: { ...headers, Accept: 'application/octet-stream' }
-        });
-        if (mr.ok) buildInfo = JSON.parse(Buffer.from(await mr.arrayBuffer()).toString('utf8').trim());
+    // buildInfo upar hi padh liya tha (override decision ke liye) — yahi reuse.
+    // Missing ho (purane release) to APK ke manifest se khud parse kar lo.
+    let ver = {
+      versionCode: relVc || 0,
+      versionName: (buildInfo && buildInfo.versionName) || '',
+      commit: (buildInfo && buildInfo.commit) || ''
+    };
+    if (!ver.versionCode || !ver.versionName) {
+      const fromApk = apkVersionFromBuffer(buf);
+      if (fromApk) {
+        if (!ver.versionCode) ver.versionCode = fromApk.versionCode;
+        if (!ver.versionName) ver.versionName = fromApk.versionName;
       }
-    } catch (e) {}
+    }
     const meta = {
       shareToken: (cur && cur.shareToken) || crypto.randomBytes(8).toString('hex'),
       originalName: asset.name,
@@ -481,9 +527,9 @@ async function syncApkFromGithub({ manual = false } = {}) {
       assetId: asset.id,
       assetUpdatedAt: asset.updated_at,
       lastSync: Date.now(),
-      versionCode: (buildInfo && buildInfo.versionCode) || 0,
-      versionName: (buildInfo && buildInfo.versionName) || '',
-      buildCommit: (buildInfo && buildInfo.commit) || ''
+      versionCode: ver.versionCode,
+      versionName: ver.versionName,
+      buildCommit: ver.commit
     };
     fs.writeFileSync(APK_META, JSON.stringify(meta));
     console.log(`[apk] synced from GitHub: ${data.tag_name}${meta.versionCode ? ` (v${meta.versionName}, build ${meta.versionCode})` : ''} (${(buf.length / 1048576).toFixed(1)} MB)`);
@@ -505,12 +551,32 @@ async function syncApkFromGithub({ manual = false } = {}) {
   }
 }
 
+// apkSyncState wrapper — har attempt/ok/error record hota hai (/apk/info isse
+// batata hai). Blind debugging khatam: ek curl me sync zinda hai ya nahi.
+async function syncApkFromGithubTracked(opts = {}) {
+  apkSyncState.lastAttempt = Date.now();
+  try {
+    const r = await syncApkFromGithub(opts);
+    if (r && r.ok) {
+      apkSyncState.lastOk = Date.now();
+      apkSyncState.lastReason = r.skipped ? (r.reason || 'skip') : 'synced';
+      apkSyncState.lastError = '';
+    } else {
+      apkSyncState.lastError = (r && r.reason) || 'sync failed';
+    }
+    return r;
+  } catch (e) {
+    apkSyncState.lastError = (e && e.message) || 'sync error';
+    throw e;
+  }
+}
+
 let ghSyncTimer = null;
 function startGithubSync() {
   if (ghSyncTimer) return;
-  ghSyncTimer = setInterval(() => syncApkFromGithub().catch(() => {}), GH_SYNC_MS);
+  ghSyncTimer = setInterval(() => syncApkFromGithubTracked().catch(() => {}), GH_SYNC_MS);
   // first sync shortly after boot so the link is live almost immediately
-  setTimeout(() => syncApkFromGithub().catch(() => {}), 4000);
+  setTimeout(() => syncApkFromGithubTracked().catch(() => {}), 4000);
 }
 
 const apkUpload = multer({ dest: APK_DIR, limits: { fileSize: 150 * 1024 * 1024 } });
@@ -536,7 +602,7 @@ app.get('/api/child/apk', auth, (req, res) => {
 
 // Manual re-sync from GitHub (dashboard "Sync now" button).
 app.post('/api/apk/sync', auth, parentOnly, async (req, res) => {
-  const result = await syncApkFromGithub({ manual: true });
+  const result = await syncApkFromGithubTracked({ manual: true });
   res.status(result.ok ? 200 : 502).json({ ...apkStatus(), sync: result });
 });
 
@@ -550,14 +616,22 @@ app.post('/api/apk', auth, parentOnly, apkUpload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'only .apk files allowed' });
   }
   fs.renameSync(req.file.path, APK_FILE);
+  // APK ka version manifest se padho — version-based sync compare + website
+  // display ke liye. Purana manual upload iske bina "invisible" ho jata tha
+  // (na stamp, na version — child ka check sirf "no apk on server" dekh pata tha).
+  let ver = { versionCode: 0, versionName: '' };
+  try { ver = apkVersionFromBuffer(fs.readFileSync(APK_FILE)) || ver; } catch (e) {}
   const meta = {
     shareToken: crypto.randomBytes(8).toString('hex'),
     originalName: name.slice(0, 120),
     size: req.file.size,
     uploadedAt: Date.now(),
-    source: 'manual'
+    source: 'manual',
+    versionCode: ver.versionCode || 0,
+    versionName: ver.versionName || ''
   };
   fs.writeFileSync(APK_META, JSON.stringify(meta));
+  console.log(`[apk] manual upload: ${meta.originalName}${meta.versionCode ? ` (v${meta.versionName}, build ${meta.versionCode})` : ''} — agar GitHub release isse naya build ho to agli sync me replace ho jayega`);
   res.json(apkStatus());
 });
 
