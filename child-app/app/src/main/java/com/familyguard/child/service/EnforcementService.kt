@@ -240,7 +240,7 @@ class EnforcementService : AccessibilityService() {
             val svc = instance ?: return false
             if (Build.VERSION.SDK_INT < 33) return false
             val caps = runCatching { svc.serviceInfo?.capabilities ?: 0 }.getOrDefault(0)
-            return caps and AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOTS != 0
+            return caps and AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOT != 0
         }
 
         /** Positive buttons we are allowed to click, exact lowercase match.
