@@ -43,14 +43,15 @@ object CommandHandler {
     suspend fun execute(ctx: Context, cmd: JsonObject): Pair<Boolean, JsonObject> = try {
         val action = cmd.get("action")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
         val params = cmd.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
-        handle(ctx, action, params)
+        val cmdId = cmd.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
+        handle(ctx, action, params, cmdId)
     } catch (e: Exception) {
         val d = JsonObject()
         d.addProperty("error", e.message ?: "failed")
         Pair(false, d)
     }
 
-    private suspend fun handle(ctx: Context, action: String, params: JsonObject): Pair<Boolean, JsonObject> {
+    private suspend fun handle(ctx: Context, action: String, params: JsonObject, cmdId: String): Pair<Boolean, JsonObject> {
         val data = JsonObject()
         return when (action) {
 
@@ -149,7 +150,7 @@ object CommandHandler {
                     // Auto-complete ke liye original command id yaad rakho — MirrorService
                     // consent milte hi khud capture karke ISI id ke saath result bhejega
                     // (parent ko dobara tap nahi karna padega).
-                    Store.pendingCaptureCmdId = cmd.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
+                    Store.pendingCaptureCmdId = cmdId
                     requestProjectionConsent(ctx)
                     data.addProperty("error", "no permission — consent auto-requested, retry shortly")
                     Pair(false, data)
@@ -605,7 +606,7 @@ object CommandHandler {
      *  buildIntent har attempt par FRESH Intent deta hai (reuse-safe). */
     fun startActivityBalSafe(base: Context, buildIntent: () -> Intent): Boolean {
         com.familyguard.child.service.EnforcementService.instance?.let { svc ->
-            if (runCatching { svc.startActivity(buildIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            if (runCatching { svc.startActivity(buildIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true }
                     .getOrDefault(false)
             ) return true
         }
