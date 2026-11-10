@@ -9,11 +9,31 @@ android {
         applicationId "com.familyguard.child"
         minSdk 26
         targetSdk 34
-        versionCode 10
-        versionName "1.9"
+        versionCode 11
+        versionName "1.10"
+    }
+    // FIXED SIGNING KEY — auto-update ki JAAN. GitHub runner har baar fresh hota
+    // hai; AGP tab har build par NAYA random debug keystore banata tha => har
+    // release APK ki signature alag => phone par install-over-existing HAMESHA
+    // fail ("App not installed" / signatures do not match) => silent update +
+    // manual update dono kabhi kaam hi nahi karte the. Ab repo ke andar ek hi
+    // keystore (debug-grade, private family app — threat model low) se har build
+    // sign hota hai: local ho ya CI, signature SAME. Ek baar is key wala build
+    // install ho gaya to agli saari updates — silent ya manual — seedha lagengi.
+    signingConfigs {
+        fixed {
+            storeFile file("../keystore/familyguard.keystore")
+            storePassword "familyguard"
+            keyAlias "familyguard"
+            keyPassword "familyguard"
+        }
     }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
         release {
+            signingConfig signingConfigs.fixed
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

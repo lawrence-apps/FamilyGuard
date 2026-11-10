@@ -3,9 +3,10 @@
 
 // Child app ka LATEST versionCode — har naye release ke saath yahan bump karo.
 // Saare PURANA-app checks isi se chalte hain (banner, phone check, watchdog).
-// v1.8/vc9: UpdateReceiver PENDING_USER_ACTION fix + fallback + honest statuses.
-const LATEST_VC = 10;
-const LATEST_V = "1.9";
+// v1.10/vc11: FIXED signing key — pehle har CI build ka debug keystore alag
+// hota tha, isliye koi bhi update install-over-existing kabhi nahi hota tha.
+const LATEST_VC = 11;
+const LATEST_V = "1.10";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",

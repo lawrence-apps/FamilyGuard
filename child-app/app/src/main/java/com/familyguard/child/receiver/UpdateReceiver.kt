@@ -7,6 +7,7 @@ import android.content.pm.PackageInstaller
 import android.os.Build
 import com.familyguard.child.data.Store
 import com.familyguard.child.service.WsChild
+import com.familyguard.child.util.CommandHandler
 
 /**
  * PackageInstaller session status callback (silent self-update).
@@ -49,11 +50,15 @@ class UpdateReceiver : BroadcastReceiver() {
                 else
                     @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 var opened = false
-                runCatching {
-                    if (confirm != null) {
+                // BAL-SAFE (vc11): BroadcastReceiver background me hota hai —
+                // Android 10+ par plain startActivity SILENTLY block ho sakta hai
+                // (koi exception nahi, dialog kabhi nahi khulti, a11y ke saamne
+                // kuch nahi). CommandHandler.startActivityBalSafe pehle a11y-
+                // bound EnforcementService ka context try karta hai (system-bound
+                // service = background-activity-start exempt), phir normal.
+                if (confirm != null) {
+                    opened = CommandHandler.startActivityBalSafe(context) {
                         confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(confirm)
-                        opened = true
                     }
                 }
                 // FALLBACK: EXTRA_INTENT na mile ya start fail ho (OEM BAL
@@ -64,14 +69,11 @@ class UpdateReceiver : BroadcastReceiver() {
                     if (sid > 0) {
                         for (pkg in INSTALLER_PACKAGES) {
                             if (opened) break
-                            runCatching {
-                                context.startActivity(
-                                    Intent("android.content.pm.action.CONFIRM_INSTALL")
-                                        .setPackage(pkg)
-                                        .putExtra(PackageInstaller.EXTRA_SESSION_ID, sid)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                                opened = true
+                            opened = CommandHandler.startActivityBalSafe(context) {
+                                Intent("android.content.pm.action.CONFIRM_INSTALL")
+                                    .setPackage(pkg)
+                                    .putExtra(PackageInstaller.EXTRA_SESSION_ID, sid)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                         }
                     }

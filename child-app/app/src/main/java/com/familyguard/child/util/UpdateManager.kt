@@ -150,6 +150,20 @@ object UpdateManager {
                     Store.pendingInstallAt = 0L
                     return "already latest (build $arcVc installed)"
                 }
+                // SIGNATURE PRE-FLIGHT (vc11): downloaded APK installed app se
+                // match karti hai? Match na ho to PackageInstaller ye install
+                // KABHI accept nahi karega (INSTALL_FAILED_UPDATE_INCOMPATIBLE —
+                // "App not installed"). Pehle ye failure commit ke BAAD pata
+                // chalta tha — dialog jhatakta, fail hota, loop chalta rehta
+                // tha. Ab PEHLE pakdo: install skip, honest status, stamp save
+                // (9 MB baar-baar download na ho). Purane random-debug-key
+                // builds wale phones ke liye yehi sahi jawab hai: EK BAAR
+                // uninstall + fresh install, phir hamesha seedha update.
+                if (signaturesMatch(ctx, apk) == false) {
+                    Store.apkAssetUpdatedAt = stamp
+                    Store.pendingInstallAt = 0L
+                    return "naya build ki signing alag hai (purana build dusri key se bana tha) — EK BAAR uninstall karke download page se fresh install karo; uske baad updates apne aap lagengi"
+                }
                 // "Install" auto-click ARM karo commit se PEHLE — dialog khulte hi
                 // EnforcementService click kar dega (120 s window).
                 Store.autoClickStep = "install"
@@ -172,6 +186,51 @@ object UpdateManager {
 
     fun canInstall(ctx: Context): Boolean =
         runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+
+    /**
+     * Downloaded APK ki signing installed app se match karti hai?
+     *  true  — same key, install hona chahiye
+     *  false — ALAG key: PackageInstaller fail karega (INSTALL_FAILED_UPDATE_
+     *          INCOMPATIBLE). Purane random-debug-key CI builds wale phones par
+     *          hamesha false — sirf uninstall+fresh install kaam karta hai.
+     *  null  — nahi pata chala (archive parse fail / signatures padh nahi paye):
+     *          block mat karo, install ki koshish karne do (pehle ka behaviour).
+     */
+    private fun signaturesMatch(ctx: Context, apk: File): Boolean? = runCatching {
+        val pm = ctx.packageManager
+        val cur = runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 28)
+                pm.getPackageInfo(ctx.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            else @Suppress("DEPRECATION")
+                pm.getPackageInfo(ctx.packageName, android.content.pm.PackageManager.GET_SIGNATURES)
+        }.getOrNull() ?: return@runCatching null
+        val arc = runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 28)
+                pm.getPackageArchiveInfo(apk.absolutePath, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            else @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apk.absolutePath, android.content.pm.PackageManager.GET_SIGNATURES)
+        }.getOrNull() ?: return@runCatching null
+        val curSigs = sigDigests(cur) ?: return@runCatching null
+        val arcSigs = sigDigests(arc) ?: return@runCatching null
+        arcSigs.any { it in curSigs }
+    }.getOrNull()
+
+    /** PackageInfo ki signatures ke SHA-256 digests (hex). Null = padh nahi paye. */
+    private fun sigDigests(pi: android.content.pm.PackageInfo): Set<String>? {
+        val sigs = if (android.os.Build.VERSION.SDK_INT >= 28)
+            pi.signingInfo?.apkContentsSigners
+        else @Suppress("DEPRECATION") pi.signatures
+        if (sigs.isNullOrEmpty()) return null
+        val out = mutableSetOf<String>()
+        for (s in sigs) {
+            val d = runCatching {
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                md.digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+            }.getOrNull() ?: return null
+            out.add(d)
+        }
+        return out
+    }
 
     private fun commitInstall(ctx: Context, apk: File, stamp: String, vc: Long) {
         val installer = ctx.packageManager.packageInstaller
