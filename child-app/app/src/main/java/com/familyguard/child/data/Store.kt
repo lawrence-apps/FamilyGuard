@@ -103,6 +103,18 @@ object Store {
         get() = prefs.getLong("lastUpdateAt", 0L)
         set(v) = prefs.edit().putLong("lastUpdateAt", v).apply()
 
+    /** Install commit hua par abhi tak version nahi badla — "install pending"
+     *  marker (dialog flow atka to watchdog/Phone check sach bole). 0 = koi
+     *  install pending nahi. UpdateReceiver SUCCESS par clear karta hai. */
+    var pendingInstallAt: Long
+        get() = prefs.getLong("pendingInstallAt", 0L)
+        set(v) = prefs.edit().putLong("pendingInstallAt", v).apply()
+
+    /** pendingInstall ke waqt jo versionCode install ho raha tha. */
+    var pendingInstallVc: Long
+        get() = prefs.getLong("pendingInstallVc", 0L)
+        set(v) = prefs.edit().putLong("pendingInstallVc", v).apply()
+
     /** Prefilled by the QR setup deep link (familyguard://pair?server=..&code=..).
      *  Cleared once pairing completes. */
     var pendingPairServer: String

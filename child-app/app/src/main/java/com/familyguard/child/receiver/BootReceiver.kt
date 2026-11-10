@@ -28,6 +28,25 @@ class BootReceiver : BroadcastReceiver() {
         runCatching {
             ContextCompat.startForegroundService(context, Intent(context, MainService::class.java))
         }
+        if (isUpdate) {
+            // Silent self-update COMPLETE hua — success record karo aur parent ko
+            // batao (WS abhi connect nahi hoga to send false dega, koi baat nahi:
+            // health/Phone check version naya dikha degi aur banner khud hat jayega).
+            runCatching {
+                val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+                val vc = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode
+                else @Suppress("DEPRECATION") pi.versionCode.toLong()
+                Store.lastUpdateStatus = "updated ✓ build $vc"
+                Store.lastUpdateAt = System.currentTimeMillis()
+                Store.pendingInstallAt = 0L
+                val o = com.google.gson.JsonObject()
+                o.addProperty("type", "update_result")
+                o.addProperty("status", Store.lastUpdateStatus)
+                o.addProperty("vc", vc)
+                o.addProperty("t", System.currentTimeMillis())
+                com.familyguard.child.service.WsChild.send(o.toString())
+            }
+        }
         UsageWorker.runOnce(context)
     }
 }

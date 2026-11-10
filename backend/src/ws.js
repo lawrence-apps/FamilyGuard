@@ -150,6 +150,23 @@ function handleChildMessage(cid, msg, raw) {
       broadcastToParents({ type: 'command_result', cid, id: msg.id, ok: !!msg.ok, data: msg.data || {} });
       break;
     }
+    case 'update_result': {
+      // Child ka REAL install outcome (UpdateReceiver/BootReceiver se) —
+      // command_result sirf "check shuru hua" batata tha; ye dialog khula,
+      // click hua, fail hua ya update COMPLETE hua — sab seedha yahan se.
+      // Persist + banner par live dikhta hai.
+      const st2 = String(msg.status || '').slice(0, 300);
+      if (st2) {
+        c.lastUpdateResult = {
+          ok: /^(updated|install dialog khula)/.test(st2),
+          status: st2,
+          t: Number(msg.t) || Date.now()
+        };
+        store.save();
+        broadcastToParents({ type: 'update_result', cid, ok: c.lastUpdateResult.ok, status: c.lastUpdateResult.status, t: c.lastUpdateResult.t });
+      }
+      break;
+    }
     case 'apps': {
       broadcastToParents({ type: 'apps', cid, apps: Array.isArray(msg.apps) ? msg.apps : [] });
       break;

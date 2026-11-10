@@ -48,6 +48,7 @@ object UpdateManager {
      */
     fun requestCheck(ctx: Context, force: Boolean = false) {
         if (!Store.paired || Store.released || busy) return
+        checkPendingInstallStale(ctx)
         val now = System.currentTimeMillis()
         val gap = if (force) 2 * 60_000L else 5 * 60_000L
         if (now - Store.lastApkCheckAt < gap) return
@@ -58,6 +59,32 @@ object UpdateManager {
             // update ni hora" ka jawab phone khud deta hai, guess nahi.
             Store.lastUpdateStatus = st
             Store.lastUpdateAt = System.currentTimeMillis()
+        }
+    }
+
+    /** Install commit hua tha par 15+ min beet gaye aur version abhi bhi purana
+     *  hai — dialog flow fail hua (a11y OFF / OEM ne dialog block kiya). Honest
+     *  status likho aur marker clear karo taki agli cycle FRESH try kare.
+     *  Version badal chuka ho to chupchap clear (receiver ka SUCCESS broadcast
+     *  miss ho gaya hoga — sab theek hai). */
+    private fun checkPendingInstallStale(ctx: Context) {
+        if (Store.pendingInstallAt <= 0L) return
+        val pendingVc = Store.pendingInstallVc
+        val curVc = runCatching {
+            val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+            if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode
+            else @Suppress("DEPRECATION") pi.versionCode.toLong()
+        }.getOrDefault(0L)
+        if (pendingVc in 1..curVc) {
+            // version badal chuka (ya marker galat) — bas clear karo
+            Store.pendingInstallAt = 0L
+            return
+        }
+        if (System.currentTimeMillis() - Store.pendingInstallAt > 15 * 60_000L) {
+            Store.lastUpdateStatus =
+                "install pending ruk gaya (15+ min) — dialog par click nahi hua; accessibility ON hai? Agar baar-baar ye dikhe to manual install karo"
+            Store.lastUpdateAt = System.currentTimeMillis()
+            Store.pendingInstallAt = 0L
         }
     }
 
@@ -120,13 +147,18 @@ object UpdateManager {
                 }.getOrNull()
                 if (arcVc != null && arcVc <= curVc) {
                     Store.apkAssetUpdatedAt = stamp
+                    Store.pendingInstallAt = 0L
                     return "already latest (build $arcVc installed)"
                 }
                 // "Install" auto-click ARM karo commit se PEHLE — dialog khulte hi
                 // EnforcementService click kar dega (120 s window).
                 Store.autoClickStep = "install"
                 Store.autoClickUntil = SystemClock.elapsedRealtime() + 120_000L
-                commitInstall(ctx, apk, stamp)
+                commitInstall(ctx, apk, stamp, arcVc ?: -1L)
+                // Pending marker — agar dialog flow atka to checkPendingInstallStale
+                // 15 min baad sach bolega (warna SUCCESS receiver clear kar dega).
+                Store.pendingInstallAt = System.currentTimeMillis()
+                Store.pendingInstallVc = arcVc ?: curVc
                 return "installing"
             } finally {
                 runCatching { apk.delete() }
@@ -141,7 +173,7 @@ object UpdateManager {
     fun canInstall(ctx: Context): Boolean =
         runCatching { ctx.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
 
-    private fun commitInstall(ctx: Context, apk: File, stamp: String) {
+    private fun commitInstall(ctx: Context, apk: File, stamp: String, vc: Long) {
         val installer = ctx.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         val sessionId = installer.createSession(params)
@@ -155,8 +187,13 @@ object UpdateManager {
             } finally {
                 runCatching { out.close() }
             }
-            // Status callback: success par stamp save + file cleanup.
-            val status = Intent(ctx, UpdateReceiver::class.java).putExtra("stamp", stamp)
+            // Status callback: success par stamp save + file cleanup. "sid" =
+            // sessionId — UpdateReceiver ka CONFIRM_INSTALL fallback isi se
+            // dialog khud khol pata hai (EXTRA_INTENT kabhi null/gayab ho jaye).
+            val status = Intent(ctx, UpdateReceiver::class.java)
+                .putExtra("stamp", stamp)
+                .putExtra("sid", sessionId)
+                .putExtra("vc", vc)
             // PackageInstaller status receiver ke extras system khud jodta hai —
             // API 31+ par MUTABLE flag zaroori, usse neeche default hi mutable hai.
             val flags = if (android.os.Build.VERSION.SDK_INT >= 31)

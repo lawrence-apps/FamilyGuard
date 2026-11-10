@@ -3,8 +3,9 @@
 
 // Child app ka LATEST versionCode — har naye release ke saath yahan bump karo.
 // Saare PURANA-app checks isi se chalte hain (banner, phone check, watchdog).
-const LATEST_VC = 8;
-const LATEST_V = "1.7";
+// v1.8/vc9: UpdateReceiver PENDING_USER_ACTION fix + fallback + honest statuses.
+const LATEST_VC = 9;
+const LATEST_V = "1.8";
 
 const S = {
   token: localStorage.getItem("fg_token") || "",
@@ -298,15 +299,24 @@ function renderStatus() {
 }
 
 // PURANA-APP BANNER — har tab ke top par. Gallery/Mirror/Phone-check sab naye
-// child build (vc7/v1.6) me hain; purana app unhe jaanta hi nahi ("unknown
-// action"). Banner ke ek tap me update command chali jati hai — bachche ke
-// phone par silent install ho jata hai (UpdateManager, screen ON zaroori).
+// child build me hain; purana app unhe jaanta hi nahi ("unknown action").
+//
+// vc <= 8 (bootstrap): PURANE build ka updater hi kharab tha — wo apne aap
+// update NAHI ho sakta (install dialog khulta hi nahi tha). Isliye banner ek
+// AAKHRI MANUAL install ka QR/link dikhata hai. vc9 ke baad SAB automatic.
 function renderVersionBanner() {
   const c = activeChild();
   const el = $("oldver-banner");
   if (!el) return;
   const vc = c && c.health && typeof c.health.versionCode === "number" ? c.health.versionCode : null;
   if (!c || !c.paired || vc === null || vc >= LATEST_VC) { el.classList.add("hidden"); return; }
+  // Server par kaunsa APK pada hai (CI meta json se) — visibility ke bina
+  // "server purana hai ya phone atka hai" pata hi nahi chalta tha.
+  if (!S.apk) { api("/api/apk").then((st) => { S.apk = st; renderVersionBanner(); }).catch(() => {}); }
+  const apk = S.apk || null;
+  const svcLine = apk && apk.uploaded && apk.vc
+    ? "✅ Server par APK: v" + esc(apk.vName || "?") + " (build " + apk.vc + ")" + (apk.vc >= LATEST_VC ? " — ready" : " — PURANA! Set tab → 🔄 Sync now")
+    : "❓ Server APK ka version nahi pata (purana sync) — Set tab → 🔄 Sync now dabao";
   // Aakhri update try ka HONEST status (server persist karta hai) — toast miss
   // ho jaye ya user na dekhe ho to bhi pata chalta hai update atka KAHAN hai.
   let lastTry = "";
@@ -319,12 +329,36 @@ function renderVersionBanner() {
       "screen off — postponed": "📵 Screen OFF thi isliye ruk gaya — screen ON rakho, 5 min me khud hoga",
       "already latest": "❗ Phone kehta hai 'already latest' — server ka APK purana hai, Set tab → 🔄 Sync now",
       "no apk on server": "❗ Server par APK nahi — Set tab → 🔄 Sync now dabao",
-      "download failed": "⚠️ Download fail — bachche ke phone ka net check karo"
+      "download failed": "⚠️ Download fail — bachche ke phone ka net check karo",
+      "install dialog khula": "📲 Install dialog khul gaya — a11y khud Install click karega (screen ON rakho)",
+      "install dialog NAHI": "⚠️ Dialog nahi khul paya — neeche wala MANUAL step karo (aakhri baar)",
+      "install failed": "⚠️ Install fail hua — agli cycle dobara try karega; baar-baar fail ho to manual step karo",
+      "install pending": "⏳ Install atak gaya (dialog par click nahi hua) — manual step karo",
+      "updated": "✅ Update ho gaya!"
     };
     const human = Object.keys(uMap).find((k) => lur.status.indexOf(k) === 0);
     lastTry = "<div style=\"margin-top:8px;padding:6px 10px;background:#FFF;border-radius:8px;border:1px solid #FCA5A5\">📋 <b>Aakhri update try (" + timeAgoHi(lur.t) + "):</b> " + (human ? uMap[human] : esc(lur.status)) + "</div>";
   }
-  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest " + LATEST_VC + " = v" + LATEST_V + ") — isliye <b>Gallery, Mirror aur Phone-check nahi chal rahe</b>: ye sab naye build me hi hain. Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min)." + lastTry;
+  $("oldver-text").innerHTML = "⚠️ <b>Bachche ke phone par app PURANA hai</b> (build " + vc + ", latest " + LATEST_VC + " = v" + LATEST_V + "). " + esc(svcLine) + "<br>" +
+    (vc <= 8
+      ? "<b>Ye purana build khud ko update nahi kar sakta</b> — uske andar wala updater hi kharab tha (install dialog kabhi khulta hi nahi tha; yehi bug naye build me fix ho gaya hai). Isliye <b>ek AAKHRI BAAR manual install</b> karo — uske baad har update hamesha apne aap hoga:"
+      : "Update bhejo — bachche ke phone par khud install ho jayega (<b>screen ON hona zaroori</b>, 2–3 min).") + lastTry;
+  // Manual-install QR (sirf vc <= 8): child phone camera se scan → landing page
+  // → Download → Install. Same link jo Set tab me hai (token wala).
+  const man = $("oldver-manual");
+  if (man) {
+    const full = apk && apk.url ? S.origin + apk.url : "";
+    if (vc <= 8 && full) {
+      let qr = "";
+      try { const q = qrcode(0, "M"); q.addData(full); q.make(); qr = q.createSvgTag({ cellSize: 3, margin: 2, scalable: true }); } catch (e) {}
+      man.innerHTML = "<div style=\"margin-top:10px;padding:10px 12px;background:#FFF;border-radius:10px;border:1px solid #FCA5A5\">" +
+        "<p style=\"margin:0 0 6px;font-weight:700\">📲 AAKHRI MANUAL STEP (2 min):</p>" +
+        "<p style=\"margin:0 0 6px\">1. <b>Child phone</b> se ye QR scan karo (ya link kholo) → 2. <b>Download</b> dabao → 3. Downloaded file kholkar <b>Install</b> dabao. Bas — uske baad kabhi ye matam nahi.</p>" +
+        "<div style=\"display:flex;gap:12px;align-items:center\">" + qr +
+        "<p style=\"margin:0;word-break:break-all;font-size:11px\">" + esc(full) + "</p></div></div>";
+      man.classList.remove("hidden");
+    } else { man.innerHTML = ""; man.classList.add("hidden"); }
+  }
   el.classList.remove("hidden");
 }
 $("oldver-update").onclick = () => {

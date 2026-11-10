@@ -24,13 +24,24 @@ jobs:
 
       - name: Build child app
         working-directory: child-app
-        run: gradle assembleDebug --no-daemon
+        run: |
+          gradle assembleDebug --no-daemon
+          # Build-info meta — backend isse "Server par APK: v1.8 (build 9)"
+          # dikha sakta hai (banner/diag honesty). versionCode/versionName
+          # build.gradle se hi padhe jaate hain, duplicate truth nahi.
+          VC=$(grep -oE 'versionCode[[:space:]]+[0-9]+' app/build.gradle | grep -oE '[0-9]+')
+          VN=$(grep -oE 'versionName[[:space:]]+"[^"]+"' app/build.gradle | sed 's/.*"\(.*\)"/\1/')
+          OUT=app/build/outputs/apk/debug
+          printf '{"versionCode":%s,"versionName":"%s","commit":"%s","builtAt":"%s"}\n' "$VC" "$VN" "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OUT/familyguard-child-meta.json"
+          cat "$OUT/familyguard-child-meta.json"
 
-      - name: Upload child APK
+      - name: Upload child APK + meta
         uses: actions/upload-artifact@v4
         with:
           name: familyguard-child-debug-apk
-          path: child-app/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            child-app/app/build/outputs/apk/debug/app-debug.apk
+            child-app/app/build/outputs/apk/debug/familyguard-child-meta.json
 
   # Publish child APK to a rolling GitHub release (tag "latest") so the backend
   # can auto-sync it — no manual upload in the dashboard. Parent app removed:
@@ -53,10 +64,11 @@ jobs:
         run: |
           mkdir -p out
           cp dist/familyguard-child-debug-apk/app-debug.apk  out/familyguard-child-debug.apk
+          cp dist/familyguard-child-debug-apk/familyguard-child-meta.json out/ 2>/dev/null || true
           cd out
           gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create latest -R "$GITHUB_REPOSITORY" \
                  --title "Latest builds (auto)" \
                  --notes "Auto-built from commit ${GITHUB_SHA::7} — backend inhe khud sync karta hai."
           gh release upload latest -R "$GITHUB_REPOSITORY" --clobber \
-            familyguard-child-debug.apk
+            familyguard-child-debug.apk familyguard-child-meta.json

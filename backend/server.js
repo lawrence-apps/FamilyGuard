@@ -369,6 +369,7 @@ fs.mkdirSync(APK_DIR, { recursive: true });
 const GH_REPO = String(process.env.GITHUB_REPO || 'lawrence-apps/FamilyGuard');
 const GH_TOKEN = String(process.env.GITHUB_TOKEN || '');
 const GH_CHILD_ASSET = String(process.env.GITHUB_CHILD_ASSET || 'familyguard-child-debug.apk');
+const GH_CHILD_META = String(process.env.GITHUB_CHILD_META || 'familyguard-child-meta.json');
 const GH_SYNC_MS = Number(process.env.GITHUB_SYNC_MINUTES || 10) * 60 * 1000;
 
 function apkMeta() {
@@ -386,6 +387,11 @@ function apkStatus() {
     source: m ? (m.source || 'manual') : '',
     releaseTag: m ? (m.releaseTag || '') : '',
     lastSync: m ? (m.lastSync || 0) : 0,
+    // CI ki meta json asset se — server par KAUNSA build hai, banner/diag isse
+    // dikhati hai ("Server par APK: v1.8 (build 9)"). Purane sync par 0/''.
+    vc: m ? (m.versionCode || 0) : 0,
+    vName: m ? (m.versionName || '') : '',
+    buildCommit: m ? (m.buildCommit || '') : '',
     githubConfigured: !!GH_REPO,
     githubTokenSet: !!GH_TOKEN
   };
@@ -453,6 +459,18 @@ async function syncApkFromGithub({ manual = false } = {}) {
     const tmp = APK_FILE + '.tmp';
     fs.writeFileSync(tmp, buf);
     fs.renameSync(tmp, APK_FILE);
+    // Build-info meta asset (CI upload karta hai) — server par KAUNSA version
+    // hai ye website/banner dikha sake. Missing ho (purane release) to null.
+    let buildInfo = null;
+    try {
+      const mi = (data.assets || []).find(a => a.name === GH_CHILD_META);
+      if (mi) {
+        const mr = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/assets/${mi.id}`, {
+          headers: { ...headers, Accept: 'application/octet-stream' }
+        });
+        if (mr.ok) buildInfo = JSON.parse(Buffer.from(await mr.arrayBuffer()).toString('utf8').trim());
+      }
+    } catch (e) {}
     const meta = {
       shareToken: (cur && cur.shareToken) || crypto.randomBytes(8).toString('hex'),
       originalName: asset.name,
@@ -462,10 +480,13 @@ async function syncApkFromGithub({ manual = false } = {}) {
       releaseTag: data.tag_name,
       assetId: asset.id,
       assetUpdatedAt: asset.updated_at,
-      lastSync: Date.now()
+      lastSync: Date.now(),
+      versionCode: (buildInfo && buildInfo.versionCode) || 0,
+      versionName: (buildInfo && buildInfo.versionName) || '',
+      buildCommit: (buildInfo && buildInfo.commit) || ''
     };
     fs.writeFileSync(APK_META, JSON.stringify(meta));
-    console.log(`[apk] synced from GitHub: ${data.tag_name} (${(buf.length / 1048576).toFixed(1)} MB)`);
+    console.log(`[apk] synced from GitHub: ${data.tag_name}${meta.versionCode ? ` (v${meta.versionName}, build ${meta.versionCode})` : ''} (${(buf.length / 1048576).toFixed(1)} MB)`);
     // Naye build par admin ko child + parent APK Telegram par bhejo (purane delete)
     tg.notifyNewRelease(data, buf);
     // Online children ko batao — child app ka silent self-update turant shuru
